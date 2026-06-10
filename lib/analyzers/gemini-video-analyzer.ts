@@ -1,7 +1,8 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { execFileSync } from 'child_process'
+import { execFile, spawn } from 'child_process'
+import { promisify } from 'util'
 import { GoogleGenerativeAI, type GenerationConfig } from '@google/generative-ai'
 import { GoogleAIFileManager, FileState } from '@google/generative-ai/server'
 import { chunkVideo, type VideoChunk } from './chunker'
@@ -25,6 +26,8 @@ import type {
   RawSynthesisOutput,
   ChunkError,
 } from './gemini-video-analyzer.types'
+
+const execFileAsync = promisify(execFile)
 
 // --- Constants ---
 export const GEMINI_MODEL = 'gemini-3.5-flash'
@@ -228,14 +231,25 @@ interface MotionScore {
   brightnessStability: number  // 0–1; low = lighting flash/cut
 }
 
-function scoreMotionPerSecond(inputPath: string): MotionScore[] {
-  const raw = execFileSync('ffmpeg', [
-    '-i', inputPath,
-    '-vf', `fps=1,scale=${MOTION_WIDTH}:${MOTION_HEIGHT}`,
-    '-pix_fmt', 'gray',
-    '-f', 'rawvideo',
-    'pipe:1',
-  ], { encoding: 'buffer', maxBuffer: 50 * 1024 * 1024 }) as unknown as Buffer
+async function scoreMotionPerSecond(inputPath: string): Promise<MotionScore[]> {
+  // spawn + streamed stdout: doesn't block the event loop and has no maxBuffer cap
+  const raw = await new Promise<Buffer>((resolve, reject) => {
+    const proc = spawn('ffmpeg', [
+      '-i', inputPath,
+      '-vf', `fps=1,scale=${MOTION_WIDTH}:${MOTION_HEIGHT}`,
+      '-pix_fmt', 'gray',
+      '-f', 'rawvideo',
+      'pipe:1',
+    ])
+    const chunks: Buffer[] = []
+    proc.stdout.on('data', (d: Buffer) => chunks.push(d))
+    proc.stderr.resume() // drain so ffmpeg never stalls on a full stderr pipe
+    proc.on('error', reject)
+    proc.on('close', code => {
+      if (code === 0) resolve(Buffer.concat(chunks))
+      else reject(new Error(`[motion-scan] ffmpeg exited with code ${code}`))
+    })
+  })
 
   const totalFrames = Math.floor(raw.length / FRAME_BYTES)
   const scores: MotionScore[] = []
@@ -417,7 +431,7 @@ async function processWidePass(
   fileManager: GoogleAIFileManager,
   model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
 ): Promise<{ summaries: PossessionSummary[]; chunkErrors: ChunkError[] }> {
-  const chunks = chunkVideo(videoPath)
+  const chunks = await chunkVideo(videoPath)
   const acquire = createSemaphore(MAX_CONCURRENCY)
   const results: PossessionSummary[][] = chunks.map(() => [])
   const chunkErrors: ChunkError[] = []
@@ -471,20 +485,20 @@ outcome: made|missed|turnover|defensive_stop|unknown  direction: left|right|cent
 confidence: 0.8-1.0=clearly visible; 0.5-0.79=inferred (use hedged prose); <0.5={"possession_id":${possessionId},"confidence":0.0,"outcome":"unknown"} only`
 }
 
-function extractBurstFrames(
+async function extractBurstFrames(
   videoPath: string,
   startS: number,
   endS: number,
   fps: number,
   cap: number
-): string[] {
+): Promise<string[]> {
   const duration = Math.max(0.1, endS - startS)
   const sessionId = `burst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
   const outPattern = path.join(os.tmpdir(), `${sessionId}_%03d.jpg`)
   const frames: string[] = []
 
   try {
-    execFileSync('ffmpeg', [
+    await execFileAsync('ffmpeg', [
       '-y',
       '-ss', startS.toFixed(3),
       '-t', duration.toFixed(3),
@@ -493,16 +507,19 @@ function extractBurstFrames(
       '-frames:v', String(cap),
       '-q:v', '2',
       outPattern,
-    ], { stdio: 'pipe' })
+    ], { maxBuffer: 10 * 1024 * 1024 })
   } catch {
     // ffmpeg may exit non-zero even when frames were written; fall through to read what exists
   }
 
   for (let i = 1; i <= cap; i++) {
     const p = path.join(os.tmpdir(), `${sessionId}_${String(i).padStart(3, '0')}.jpg`)
-    if (!fs.existsSync(p)) break
-    frames.push(fs.readFileSync(p).toString('base64'))
-    try { fs.unlinkSync(p) } catch {}
+    try {
+      frames.push((await fs.promises.readFile(p)).toString('base64'))
+    } catch {
+      break // frame doesn't exist — ffmpeg produced fewer than cap
+    }
+    fs.promises.unlink(p).catch(() => {})
   }
 
   return frames
@@ -535,7 +552,7 @@ async function analyzeOnePossession(
   const burstStart = Math.max(0, peakTs - BURST_BEFORE)
   const burstEnd   = Math.min(videoDuration, peakTs + BURST_AFTER)
 
-  const frames = extractBurstFrames(videoPath, burstStart, burstEnd, BURST_FPS, BURST_FRAME_CAP)
+  const frames = await extractBurstFrames(videoPath, burstStart, burstEnd, BURST_FPS, BURST_FRAME_CAP)
   // DIAG 1: burst extraction result
   console.log(
     `[diag] possession ${possessionIndex + 1}/${totalPossessions}:` +
@@ -945,7 +962,7 @@ export async function analyzeVideoWithGemini(
 
   // Component A — motion scan (free, no API call)
   console.log('[motion-scan] scanning full video for motion...')
-  const motionScores = scoreMotionPerSecond(videoPath)
+  const motionScores = await scoreMotionPerSecond(videoPath)
   const highActionCount = motionScores.filter(s => s.activeCells >= 4).length
   console.log(`[motion-scan] done: ${motionScores.length}s scanned, ${highActionCount} high-action seconds`)
 

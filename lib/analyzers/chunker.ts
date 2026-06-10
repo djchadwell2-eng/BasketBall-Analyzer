@@ -1,7 +1,10 @@
-import { execFileSync } from 'child_process'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+
+const execFileAsync = promisify(execFile)
 
 export const DEFAULT_CHUNK_DURATION = 300 // 5 minutes in seconds
 const DEFAULT_FPS = 1
@@ -13,8 +16,8 @@ export interface VideoChunk {
   index: number
 }
 
-function getVideoDurationSeconds(inputPath: string): number {
-  const raw = execFileSync('ffprobe', [
+async function getVideoDurationSeconds(inputPath: string): Promise<number> {
+  const { stdout: raw } = await execFileAsync('ffprobe', [
     '-v', 'quiet', '-print_format', 'json', '-show_streams', inputPath,
   ], { encoding: 'utf8' })
   const data = JSON.parse(raw) as { streams?: { codec_type: string; duration?: string }[] }
@@ -42,12 +45,12 @@ export function computeChunkSegments(
   return segments
 }
 
-export function chunkVideo(
+export async function chunkVideo(
   inputPath: string,
   chunkDuration = DEFAULT_CHUNK_DURATION,
   fps = DEFAULT_FPS
-): VideoChunk[] {
-  const durationSeconds = getVideoDurationSeconds(inputPath)
+): Promise<VideoChunk[]> {
+  const durationSeconds = await getVideoDurationSeconds(inputPath)
   const segments = computeChunkSegments(durationSeconds, chunkDuration)
   const sessionId = `gemini_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -56,11 +59,11 @@ export function chunkVideo(
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i]
       const outPath = path.join(os.tmpdir(), `${sessionId}_chunk_${i}.mp4`)
-      execFileSync('ffmpeg', [
+      await execFileAsync('ffmpeg', [
         '-y', '-ss', String(seg.startOffset), '-i', inputPath,
         '-t', String(seg.duration), '-vf', `fps=${fps}`,
         '-an', '-c:v', 'libx264', '-preset', 'ultrafast', outPath,
-      ], { stdio: 'pipe' })
+      ], { maxBuffer: 10 * 1024 * 1024 })
       console.log(
         `[chunker] chunk ${i + 1}/${segments.length} written: ${outPath}` +
         ` (${seg.startOffset}s–${seg.startOffset + seg.duration}s)`
