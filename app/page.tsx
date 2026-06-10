@@ -3,10 +3,9 @@
 import { useState, useRef } from 'react'
 import Link from 'next/link'
 import VideoUpload from '@/components/VideoUpload'
-import FocusPlayerInput from '@/components/FocusPlayerInput'
 import AnalysisTabs from '@/components/AnalysisTabs'
 import { supabase } from '@/lib/supabase'
-import type { FocusPlayer, PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation } from '@/lib/analyzeFrames'
+import type { PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation } from '@/lib/types'
 import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
 
 type AppState = 'idle' | 'uploading' | 'extracting' | 'analyzing' | 'done' | 'error'
@@ -34,7 +33,6 @@ export default function HomePage() {
   const [videoId, setVideoId] = useState<string | null>(null)
   const [gameTitle, setGameTitle] = useState('')
   const [titleSaved, setTitleSaved] = useState(false)
-  const [focusPlayer, setFocusPlayer] = useState<FocusPlayer | null>(null)
   const [playerReport, setPlayerReport] = useState<PlayerReportType | null>(null)
   const [strategicAdjustments, setStrategicAdjustments] = useState<StrategicAdjustment[]>([])
   const [rankedObservations, setRankedObservations] = useState<RankedObservation[]>([])
@@ -71,7 +69,6 @@ export default function HomePage() {
     try {
       const formData = new FormData()
       formData.append('video', file)
-      if (focusPlayer) formData.append('focusPlayer', JSON.stringify(focusPlayer))
 
       setAppState('extracting')
       const response = await fetch('/api/analyze', { method: 'POST', body: formData })
@@ -264,7 +261,8 @@ export default function HomePage() {
         {(appState === 'idle' || appState === 'error') && (
           <>
             <VideoUpload onUpload={handleUpload} />
-            <FocusPlayerInput value={focusPlayer} onChange={setFocusPlayer} />
+            {/* FocusPlayerInput hidden until player tracking is wired into the
+                Gemini deep pass — the analyzer currently ignores focusPlayer. */}
           </>
         )}
 

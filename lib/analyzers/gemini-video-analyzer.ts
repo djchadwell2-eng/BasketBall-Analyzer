@@ -18,7 +18,7 @@ import type {
   RankedObservation,
   GameIdentity,
   StrategicAdjustment,
-} from '../analyzeFrames'
+} from '../types'
 import type {
   PossessionSummary,
   RawWideResponse,
@@ -221,7 +221,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = M
 
 // =============================================================================
 // COMPONENT A — Motion Scan (free, no API)
-// Ported from lib/extractFrames.ts — scoreMotionPerSecond + brightness logic.
+// scoreMotionPerSecond + brightness logic (ported from the retired frame-extraction pipeline).
 // =============================================================================
 
 interface MotionScore {
@@ -1026,7 +1026,9 @@ export async function analyzeVideoWithGemini(
     defensiveTendencies:  synthesis.defensiveTendencies,
     transitionAnalysis:   synthesis.transitionAnalysis,
     gameIdentity:         synthesis.gameIdentity,
-    playerReport: focusPlayer ? null : null,
+    // TODO: focus-player tracking not yet implemented in the Gemini cascade —
+    // the UI input is hidden until this produces a real report.
+    playerReport: null,
     strategicAdjustments: synthesis.strategicAdjustments,
     rankedObservations:   synthesis.rankedObservations,
     computedStats,

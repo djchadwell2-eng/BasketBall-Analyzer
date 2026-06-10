@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { motion } from 'framer-motion'
-import type { PlayerReport as PlayerReportType, PlayerEvent, PossessionResult } from '@/lib/analyzeFrames'
+import type { PlayerReport as PlayerReportType, PlayerEvent, PossessionResult } from '@/lib/types'
 import { computePlayerStats } from '@/lib/computePlayerStats'
 
 interface Props {

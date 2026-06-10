@@ -4,8 +4,8 @@ import { Readable } from 'stream'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { cleanupTempFile } from '@/lib/extractFrames'
-import type { FocusPlayer } from '@/lib/analyzeFrames'
+import { cleanupTempFile } from '@/lib/tempFiles'
+import type { FocusPlayer } from '@/lib/types'
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -267,7 +267,7 @@ async function processAnalysis(
     await send({
       type: 'error',
       message: is429
-        ? 'OpenAI rate limit hit (too many tokens this minute). Wait 60 seconds and try again.'
+        ? 'Gemini rate limit hit (too many requests/tokens this minute). Wait 60 seconds and try again.'
         : message,
     })
   } finally {

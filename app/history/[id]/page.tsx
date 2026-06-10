@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import TitleEditor from '@/components/TitleEditor'
 import AnalysisTabs from '@/components/AnalysisTabs'
 import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
-import type { PatternInsight, TendencyItem, GameIdentity, BasketballEvent, PlayerReport as PlayerReportType, PlayerEvent, StrategicAdjustment, RankedObservation } from '@/lib/analyzeFrames'
+import type { PatternInsight, TendencyItem, GameIdentity, BasketballEvent, PlayerReport as PlayerReportType, PlayerEvent, StrategicAdjustment, RankedObservation } from '@/lib/types'
 
 export const revalidate = 0
 

@@ -1,4 +1,4 @@
-import type { SequenceResult, PossessionResult } from './analyzeFrames'
+import type { SequenceResult, PossessionResult } from './types'
 
 export interface ComputedStats {
   playTypeFreq: { playType: string; count: number; timestamps: number[] }[]

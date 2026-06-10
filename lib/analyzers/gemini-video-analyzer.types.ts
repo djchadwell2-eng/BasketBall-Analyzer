@@ -1,4 +1,4 @@
-import type { SequenceResult, PossessionResult } from '../analyzeFrames'
+import type { SequenceResult, PossessionResult } from '../types'
 
 // Raw JSON shape returned by the model for a single chunk
 export interface RawChunkPossession {

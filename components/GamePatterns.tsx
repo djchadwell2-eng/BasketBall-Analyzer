@@ -2,7 +2,7 @@
 
 import { Target, Zap, RefreshCw, TrendingUp, Shield, Swords, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
-import type { PatternInsight, TendencyItem, GameIdentity, StrategicAdjustment, RankedObservation } from '@/lib/analyzeFrames'
+import type { PatternInsight, TendencyItem, GameIdentity, StrategicAdjustment, RankedObservation } from '@/lib/types'
 
 interface Props {
   patternInsights: PatternInsight[]

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { FocusPlayer } from '@/lib/analyzeFrames'
+import type { FocusPlayer } from '@/lib/types'
 
 interface Props {
   value: FocusPlayer | null

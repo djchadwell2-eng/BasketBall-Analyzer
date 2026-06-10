@@ -1,4 +1,4 @@
-import type { PossessionResult } from './analyzeFrames'
+import type { PossessionResult } from './types'
 
 export interface PhaseStats {
   label: string

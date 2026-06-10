@@ -11,7 +11,7 @@ import PlayerReport from './PlayerReport'
 import GameFlowTimeline from './GameFlowTimeline'
 import TeamStatSheet from './TeamStatSheet'
 import type { SequenceResult, PossessionResult } from './FilmRoom'
-import type { PatternInsight, TendencyItem, GameIdentity, StrategicAdjustment, PlayerReport as PlayerReportType, RankedObservation } from '@/lib/analyzeFrames'
+import type { PatternInsight, TendencyItem, GameIdentity, StrategicAdjustment, PlayerReport as PlayerReportType, RankedObservation } from '@/lib/types'
 
 interface Props {
   videoUrl: string | null

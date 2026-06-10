@@ -1,4 +1,4 @@
-import type { PlayerEvent, PossessionResult } from './analyzeFrames'
+import type { PlayerEvent, PossessionResult } from './types'
 
 export interface PlayerTendencies {
   leftRightBias: number        // -1 (left-heavy) to +1 (right-heavy), 0 = balanced
