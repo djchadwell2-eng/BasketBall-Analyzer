@@ -1,5 +1,8 @@
 import Link from 'next/link'
+import { Folder } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import DeleteVideoButton from '@/components/DeleteVideoButton'
+import VideoFolderMenu from '@/components/VideoFolderMenu'
 
 export const revalidate = 0
 
@@ -8,6 +11,12 @@ interface VideoRow {
   file_name: string
   title: string | null
   created_at: string
+  folder_id: string | null
+}
+
+interface FolderRow {
+  id: string
+  name: string
 }
 
 function timeAgo(dateStr: string): string {
@@ -20,13 +29,78 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`
 }
 
+function VideoRowItem({
+  video,
+  index,
+  allFolders,
+}: {
+  video: VideoRow
+  index: number
+  allFolders: FolderRow[]
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-white/[0.02] border border-white/[0.06] rounded-xl hover:border-orange-500/30 hover:bg-orange-500/[0.04] transition-all group">
+      <Link
+        href={`/history/${video.id}`}
+        className="flex items-center gap-5 flex-1 min-w-0 px-5 py-4"
+      >
+        <span className="font-mono text-xs font-bold text-orange-500/40 group-hover:text-orange-500/70 transition-colors w-6 shrink-0">
+          {String(index + 1).padStart(2, '0')}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-white text-sm truncate">
+            {video.title ?? video.file_name}
+          </p>
+          <p className="text-xs text-gray-600 mt-0.5">
+            {timeAgo(video.created_at)} &middot; {new Date(video.created_at).toLocaleDateString()}
+          </p>
+        </div>
+        <span className="text-gray-600 group-hover:text-orange-400 transition-colors text-lg leading-none">›</span>
+      </Link>
+      <VideoFolderMenu
+        videoId={video.id}
+        folders={allFolders}
+        currentFolderId={video.folder_id}
+      />
+      <DeleteVideoButton videoId={video.id} />
+    </div>
+  )
+}
+
 export default async function HistoryPage() {
-  const { data: videos } = await supabase
-    .from('videos')
-    .select('id, file_name, title, created_at')
-    .order('created_at', { ascending: false })
+  const [{ data: videos }, { data: folderData }] = await Promise.all([
+    supabase
+      .from('videos')
+      .select('id, file_name, title, created_at, folder_id')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('folders')
+      .select('id, name')
+      .order('name', { ascending: true }),
+  ])
 
   const rows = (videos ?? []) as VideoRow[]
+  const allFolders = (folderData ?? []) as FolderRow[]
+
+  // Group videos by folder
+  const videosByFolder = new Map<string, VideoRow[]>()
+  const unsortedRows: VideoRow[] = []
+  for (const video of rows) {
+    if (video.folder_id) {
+      if (!videosByFolder.has(video.folder_id)) videosByFolder.set(video.folder_id, [])
+      videosByFolder.get(video.folder_id)!.push(video)
+    } else {
+      unsortedRows.push(video)
+    }
+  }
+  const foldersWithVideos = allFolders.filter(f => videosByFolder.has(f.id))
+
+  // Build global index for row numbering (folders first, then unsorted)
+  const orderedRows = [
+    ...foldersWithVideos.flatMap(f => videosByFolder.get(f.id) ?? []),
+    ...unsortedRows,
+  ]
+  const globalIndexMap = new Map(orderedRows.map((r, i) => [r.id, i]))
 
   return (
     <main className="min-h-screen bg-[#080808] text-white">
@@ -92,25 +166,57 @@ export default async function HistoryPage() {
             </Link>
           </div>
         ) : (
-          <div className="space-y-2">
-            {rows.map((video, i) => (
-              <Link
-                key={video.id}
-                href={`/history/${video.id}`}
-                className="flex items-center gap-5 px-5 py-4 bg-white/[0.02] border border-white/[0.06] rounded-xl hover:border-orange-500/30 hover:bg-orange-500/[0.04] transition-all group"
-              >
-                <span className="font-mono text-xs font-bold text-orange-500/40 group-hover:text-orange-500/70 transition-colors w-6 shrink-0">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-white text-sm truncate">{video.title ?? video.file_name}</p>
-                  <p className="text-xs text-gray-600 mt-0.5">
-                    {timeAgo(video.created_at)} &middot; {new Date(video.created_at).toLocaleDateString()}
-                  </p>
+          <div className="space-y-8">
+
+            {/* Folder sections */}
+            {foldersWithVideos.map(folder => (
+              <div key={folder.id}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Folder size={12} className="text-orange-500/60" />
+                  <span className="text-[11px] font-semibold text-orange-500/60 tracking-[0.18em] uppercase">
+                    {folder.name}
+                  </span>
+                  <span className="text-[9px] text-gray-700 ml-1">
+                    {videosByFolder.get(folder.id)?.length ?? 0}
+                  </span>
                 </div>
-                <span className="text-gray-600 group-hover:text-orange-400 transition-colors text-lg leading-none">›</span>
-              </Link>
+                <div className="space-y-2">
+                  {(videosByFolder.get(folder.id) ?? []).map(video => (
+                    <VideoRowItem
+                      key={video.id}
+                      video={video}
+                      index={globalIndexMap.get(video.id)!}
+                      allFolders={allFolders}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
+
+            {/* Unsorted section */}
+            {unsortedRows.length > 0 && (
+              <div>
+                {foldersWithVideos.length > 0 && (
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-[11px] font-semibold text-gray-600 tracking-[0.18em] uppercase">
+                      Unsorted
+                    </span>
+                    <span className="text-[9px] text-gray-700 ml-1">{unsortedRows.length}</span>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {unsortedRows.map(video => (
+                    <VideoRowItem
+                      key={video.id}
+                      video={video}
+                      index={globalIndexMap.get(video.id)!}
+                      allFolders={allFolders}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
         )}
       </div>

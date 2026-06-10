@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Link from 'next/link'
 import VideoUpload from '@/components/VideoUpload'
-import FilmRoom from '@/components/FilmRoom'
+import FocusPlayerInput from '@/components/FocusPlayerInput'
+import AnalysisTabs from '@/components/AnalysisTabs'
 import { supabase } from '@/lib/supabase'
-import type { SequenceResult } from '@/components/FilmRoom'
+import type { FocusPlayer, PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation } from '@/lib/analyzeFrames'
+import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
 
 type AppState = 'idle' | 'uploading' | 'extracting' | 'analyzing' | 'done' | 'error'
 
@@ -18,6 +20,12 @@ const STEPS: { state: AppState; label: string; num: string }[] = [
 export default function HomePage() {
   const [appState, setAppState] = useState<AppState>('idle')
   const [sequences, setSequences] = useState<SequenceResult[]>([])
+  const [possessions, setPossessions] = useState<PossessionResult[]>([])
+  const [patternInsights, setPatternInsights] = useState<PatternInsight[]>([])
+  const [offensiveTendencies, setOffensiveTendencies] = useState<TendencyItem[]>([])
+  const [defensiveTendencies, setDefensiveTendencies] = useState<TendencyItem[]>([])
+  const [transitionAnalysis, setTransitionAnalysis] = useState('')
+  const [gameIdentity, setGameIdentity] = useState<GameIdentity | null>(null)
   const [reportText, setReportText] = useState('')
   const [model, setModel] = useState('')
   const [frameCount, setFrameCount] = useState(0)
@@ -26,12 +34,27 @@ export default function HomePage() {
   const [videoId, setVideoId] = useState<string | null>(null)
   const [gameTitle, setGameTitle] = useState('')
   const [titleSaved, setTitleSaved] = useState(false)
+  const [focusPlayer, setFocusPlayer] = useState<FocusPlayer | null>(null)
+  const [playerReport, setPlayerReport] = useState<PlayerReportType | null>(null)
+  const [strategicAdjustments, setStrategicAdjustments] = useState<StrategicAdjustment[]>([])
+  const [rankedObservations, setRankedObservations] = useState<RankedObservation[]>([])
+  const [uploadDiagnostic, setUploadDiagnostic] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
+  const [progressMessage, setProgressMessage] = useState('')
+  const [eta, setEta] = useState<number | null>(null)
+  const progressStartRef = useRef<{ time: number; pct: number } | null>(null)
 
   async function handleUpload(file: File) {
     if (videoURL) URL.revokeObjectURL(videoURL)
     setVideoURL(URL.createObjectURL(file))
     setAppState('uploading')
     setSequences([])
+    setPossessions([])
+    setPatternInsights([])
+    setOffensiveTendencies([])
+    setDefensiveTendencies([])
+    setTransitionAnalysis('')
+    setGameIdentity(null)
     setReportText('')
     setModel('')
     setFrameCount(0)
@@ -39,28 +62,92 @@ export default function HomePage() {
     setVideoId(null)
     setGameTitle('')
     setTitleSaved(false)
+    setPlayerReport(null)
+    setProgress(0)
+    setProgressMessage('')
+    setEta(null)
+    progressStartRef.current = null
 
     try {
       const formData = new FormData()
       formData.append('video', file)
+      if (focusPlayer) formData.append('focusPlayer', JSON.stringify(focusPlayer))
 
       setAppState('extracting')
       const response = await fetch('/api/analyze', { method: 'POST', body: formData })
 
       if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error ?? `Server error: ${response.status}`)
+        let message = `Server error: ${response.status}`
+        try {
+          const text = await response.text()
+          if (text) message = (JSON.parse(text) as { error?: string }).error ?? message
+        } catch {}
+        throw new Error(message)
       }
 
-      setAppState('analyzing')
-      const data = await response.json()
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-      setSequences(data.sequences ?? [])
-      setReportText(data.analysis?.summary ?? '')
-      setModel(data.analysis?.model ?? '')
-      setFrameCount(data.analysis?.frameCount ?? 0)
-      setVideoId(data.videoId ?? null)
-      setAppState('done')
+      outer: while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()!
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          let event: { type: string; pct?: number; message?: string; data?: Record<string, unknown>; message_text?: string }
+          try {
+            event = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
+
+          if (event.type === 'progress') {
+            const pct = event.pct ?? 0
+            setProgress(pct)
+            setProgressMessage(event.message ?? '')
+            if (pct >= 60) setAppState('analyzing')
+            if (pct > 5) {
+              const now = Date.now()
+              if (!progressStartRef.current) {
+                progressStartRef.current = { time: now, pct }
+              } else {
+                const elapsed = (now - progressStartRef.current.time) / 1000
+                const pctDone = pct - progressStartRef.current.pct
+                if (pctDone > 0) {
+                  const rate = pctDone / elapsed
+                  setEta(Math.round((100 - pct) / rate))
+                }
+              }
+            }
+          } else if (event.type === 'complete') {
+            const d = event.data ?? {}
+            setSequences((d.sequences as typeof sequences) ?? [])
+            setPossessions((d.possessions as typeof possessions) ?? [])
+            setPatternInsights((d.patternInsights as typeof patternInsights) ?? [])
+            setOffensiveTendencies((d.offensiveTendencies as typeof offensiveTendencies) ?? [])
+            setDefensiveTendencies((d.defensiveTendencies as typeof defensiveTendencies) ?? [])
+            setTransitionAnalysis((d.transitionAnalysis as string) ?? '')
+            setGameIdentity((d.gameIdentity as typeof gameIdentity) ?? null)
+            const a = (d.analysis as { summary?: string; model?: string; frameCount?: number }) ?? {}
+            setReportText(a.summary ?? '')
+            setModel(a.model ?? '')
+            setFrameCount(a.frameCount ?? 0)
+            setVideoId((d.videoId as string) ?? null)
+            setUploadDiagnostic((d.uploadDiagnostic as string) ?? null)
+            setPlayerReport((d.playerReport as typeof playerReport) ?? null)
+            setStrategicAdjustments((d.strategicAdjustments as typeof strategicAdjustments) ?? [])
+            setRankedObservations((d.rankedObservations as typeof rankedObservations) ?? [])
+            setAppState('done')
+            break outer
+          } else if (event.type === 'error') {
+            throw new Error((event.message as string) ?? 'Analysis failed.')
+          }
+        }
+      }
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Upload failed.')
       setAppState('error')
@@ -71,12 +158,25 @@ export default function HomePage() {
     if (videoURL) URL.revokeObjectURL(videoURL)
     setVideoURL(null)
     setSequences([])
+    setPossessions([])
+    setPatternInsights([])
+    setOffensiveTendencies([])
+    setDefensiveTendencies([])
+    setTransitionAnalysis('')
+    setGameIdentity(null)
     setReportText('')
     setModel('')
     setFrameCount(0)
     setVideoId(null)
     setGameTitle('')
     setTitleSaved(false)
+    setStrategicAdjustments([])
+    setRankedObservations([])
+    setUploadDiagnostic(null)
+    setProgress(0)
+    setProgressMessage('')
+    setEta(null)
+    progressStartRef.current = null
     setAppState('idle')
   }
 
@@ -89,19 +189,45 @@ export default function HomePage() {
   const isLoading = ['uploading', 'extracting', 'analyzing'].includes(appState)
 
   return (
-    <main className="min-h-screen bg-[#080808] text-white">
+    <main className="relative min-h-screen bg-[#05080f] text-white">
+
+      {/* ── Full-screen atmospheric glows (fixed so they paint the whole viewport) ── */}
+      {/* Primary orange spotlight — top-left, bleeds across entire page */}
+      <div
+        className="fixed top-0 left-0 w-[900px] h-[700px] pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse at 20% 15%, rgba(251,146,60,0.18) 0%, rgba(234,88,12,0.08) 40%, transparent 70%)',
+          zIndex: 0,
+        }}
+      />
+      {/* Secondary warmth — mid-right, keeps the right side alive */}
+      <div
+        className="fixed top-0 right-0 w-[600px] h-[500px] pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse at 85% 10%, rgba(234,88,12,0.07) 0%, transparent 60%)',
+          zIndex: 0,
+        }}
+      />
+      {/* Tertiary ambient — lower center, so scrolled content stays warm */}
+      <div
+        className="fixed bottom-0 left-1/3 w-[700px] h-[400px] pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse at 40% 100%, rgba(234,88,12,0.05) 0%, transparent 65%)',
+          zIndex: 0,
+        }}
+      />
 
       {/* Header */}
-      <div className="relative border-b border-white/[0.06] overflow-hidden">
+      <div className="relative border-b border-white/[0.06] overflow-hidden" style={{ zIndex: 1 }}>
+        {/* Dot grid */}
         <div
-          className="absolute inset-0 opacity-[0.035]"
+          className="absolute inset-0 opacity-[0.04]"
           style={{
             backgroundImage:
-              'radial-gradient(circle, rgba(255,255,255,0.8) 1px, transparent 1px)',
+              'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1px)',
             backgroundSize: '28px 28px',
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-orange-950/30 via-orange-950/10 to-transparent pointer-events-none" />
 
         <div className="relative max-w-5xl mx-auto px-6 py-14">
           <div className="flex items-start justify-between gap-6">
@@ -133,14 +259,17 @@ export default function HomePage() {
       </div>
 
       {/* Content */}
-      <div className={`mx-auto px-6 py-12 ${appState === 'done' ? 'max-w-7xl' : 'max-w-5xl'}`}>
+      <div className={`relative mx-auto px-6 py-12 ${appState === 'done' ? 'max-w-7xl' : 'max-w-5xl'}`} style={{ zIndex: 1 }}>
 
         {(appState === 'idle' || appState === 'error') && (
-          <VideoUpload onUpload={handleUpload} />
+          <>
+            <VideoUpload onUpload={handleUpload} />
+            <FocusPlayerInput value={focusPlayer} onChange={setFocusPlayer} />
+          </>
         )}
 
         {appState === 'error' && (
-          <div className="mt-4 p-4 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-sm">
+          <div className="mt-4 p-4 bg-red-500/[0.08] border border-red-500/20 rounded-xl text-red-400 text-sm">
             {errorMessage}
           </div>
         )}
@@ -149,7 +278,7 @@ export default function HomePage() {
           <div className="flex flex-col items-center gap-10 py-24">
             {/* Double-ring spinner */}
             <div className="relative w-12 h-12">
-              <div className="absolute inset-0 rounded-full border-2 border-gray-800" />
+              <div className="absolute inset-0 rounded-full border-2 border-white/[0.06]" />
               <div className="absolute inset-0 rounded-full border-2 border-orange-500 border-t-transparent animate-spin" />
             </div>
 
@@ -181,15 +310,42 @@ export default function HomePage() {
                 )
               })}
             </div>
+
+            {/* Progress bar + ETA */}
+            <div className="w-64 space-y-2">
+              <div className="h-[3px] bg-white/[0.05] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-orange-500 rounded-full transition-all duration-500 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-gray-600 font-mono truncate">
+                  {progressMessage || 'Starting...'}
+                </span>
+                {eta !== null && eta > 2 && (
+                  <span className="text-[10px] text-gray-700 font-mono shrink-0">
+                    ~{eta >= 60 ? `${Math.floor(eta / 60)}m ${eta % 60}s` : `${eta}s`}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
         {appState === 'done' && videoURL && (
           <div className="space-y-8">
 
+            {/* Upload diagnostic — shown when video file couldn't be saved to storage */}
+            {uploadDiagnostic && (
+              <div className="max-w-2xl p-3 bg-amber-500/[0.08] border border-amber-500/20 rounded-xl text-amber-400 text-xs">
+                Video not saved to cloud storage — analysis is saved but playback won&apos;t be available in History. ({uploadDiagnostic})
+              </div>
+            )}
+
             {/* Title rename */}
             {videoId && (
-              <div className="max-w-2xl bg-white/[0.02] border border-white/[0.06] rounded-xl px-5 py-4">
+              <div className="max-w-2xl bg-white/[0.03] border border-white/[0.08] rounded-xl px-5 py-4">
                 <p className="text-[11px] font-semibold text-orange-500/70 tracking-[0.2em] uppercase mb-3">
                   Name this game
                 </p>
@@ -200,7 +356,7 @@ export default function HomePage() {
                     onChange={e => { setGameTitle(e.target.value); setTitleSaved(false) }}
                     onKeyDown={e => e.key === 'Enter' && saveTitle()}
                     placeholder="e.g. Knicks vs Lakers — Game 3"
-                    className="flex-1 bg-white/[0.04] border border-white/[0.08] focus:border-orange-500/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none transition-colors"
+                    className="flex-1 bg-white/[0.04] border border-white/[0.08] focus:border-orange-500/40 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-700 outline-none transition-colors"
                   />
                   <button
                     onClick={saveTitle}
@@ -213,13 +369,21 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Film room */}
-            <FilmRoom
+            <AnalysisTabs
               videoUrl={videoURL}
               sequences={sequences}
+              possessions={possessions}
               reportText={reportText}
               model={model}
               frameCount={frameCount}
+              patternInsights={patternInsights}
+              offensiveTendencies={offensiveTendencies}
+              defensiveTendencies={defensiveTendencies}
+              transitionAnalysis={transitionAnalysis}
+              gameIdentity={gameIdentity}
+              strategicAdjustments={strategicAdjustments}
+              rankedObservations={rankedObservations}
+              playerReport={playerReport}
             />
 
             <div className="pt-2 pb-6">

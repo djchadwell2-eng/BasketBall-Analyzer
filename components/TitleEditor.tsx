@@ -37,7 +37,7 @@ export default function TitleEditor({ videoId, initialTitle }: Props) {
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
-          className="flex-1 bg-white/[0.04] border border-orange-500/50 rounded-lg px-4 py-2 text-xl font-black tracking-tight text-white outline-none"
+          className="flex-1 bg-white/[0.04] border border-orange-500/50 rounded-lg px-3 py-1.5 text-base font-semibold tracking-tight text-white outline-none"
         />
         <button
           onClick={save}
@@ -58,7 +58,7 @@ export default function TitleEditor({ videoId, initialTitle }: Props) {
 
   return (
     <div className="flex items-baseline gap-3 mt-1 group">
-      <h1 className="text-3xl font-black tracking-tight text-white truncate">{title}</h1>
+      <h1 className="text-xl font-semibold tracking-tight text-white truncate">{title}</h1>
       <button
         onClick={() => { setDraft(title); setEditing(true) }}
         className="text-xs text-gray-600 hover:text-orange-400 transition-colors opacity-0 group-hover:opacity-100"
