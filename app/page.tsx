@@ -4,8 +4,9 @@ import { useState, useRef } from 'react'
 import Link from 'next/link'
 import VideoUpload from '@/components/VideoUpload'
 import AnalysisTabs from '@/components/AnalysisTabs'
+import FocusTeamSelector from '@/components/FocusTeamSelector'
 import { supabase } from '@/lib/supabase'
-import type { PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation } from '@/lib/types'
+import type { PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation, FocusTeam } from '@/lib/types'
 import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
 
 type AppState = 'idle' | 'uploading' | 'extracting' | 'analyzing' | 'done' | 'error'
@@ -37,6 +38,7 @@ export default function HomePage() {
   const [strategicAdjustments, setStrategicAdjustments] = useState<StrategicAdjustment[]>([])
   const [rankedObservations, setRankedObservations] = useState<RankedObservation[]>([])
   const [uploadDiagnostic, setUploadDiagnostic] = useState<string | null>(null)
+  const [focusTeam, setFocusTeam] = useState<FocusTeam | null>(null)
   const [progress, setProgress] = useState(0)
   const [progressMessage, setProgressMessage] = useState('')
   const [eta, setEta] = useState<number | null>(null)
@@ -69,6 +71,7 @@ export default function HomePage() {
     try {
       const formData = new FormData()
       formData.append('video', file)
+      if (focusTeam) formData.append('focusTeam', JSON.stringify(focusTeam))
 
       setAppState('extracting')
       const response = await fetch('/api/analyze', { method: 'POST', body: formData })
@@ -260,7 +263,12 @@ export default function HomePage() {
 
         {(appState === 'idle' || appState === 'error') && (
           <>
-            <VideoUpload onUpload={handleUpload} />
+            {/* Team selector first — dropping a video starts the analysis
+                immediately, so the team must be chosen before upload. */}
+            <FocusTeamSelector value={focusTeam} onChange={setFocusTeam} />
+            <div className="mt-6">
+              <VideoUpload onUpload={handleUpload} />
+            </div>
             {/* FocusPlayerInput hidden until player tracking is wired into the
                 Gemini deep pass — the analyzer currently ignores focusPlayer. */}
           </>

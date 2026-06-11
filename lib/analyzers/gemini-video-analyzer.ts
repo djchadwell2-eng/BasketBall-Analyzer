@@ -13,6 +13,7 @@ import type {
   SequenceResult,
   BasketballEvent,
   FocusPlayer,
+  FocusTeam,
   TendencyItem,
   PatternInsight,
   RankedObservation,
@@ -307,10 +308,28 @@ function findPeakMotion(scores: MotionScore[], startTs: number, endTs: number): 
 }
 
 // =============================================================================
+// Team perspective — tells every prompt WHICH team the report is about.
+// Without this, Gemini picks a team arbitrarily and "offense"/"defense" in the
+// output may flip between possessions.
+// =============================================================================
+
+/** Human-readable team label, e.g. `the team in white jerseys (Eagles)`. */
+function focusTeamLabel(focusTeam: FocusTeam): string {
+  const name = focusTeam.teamName?.trim()
+  return `the team in ${focusTeam.jerseyColor.trim()} jerseys${name ? ` (${name})` : ''}`
+}
+
+// =============================================================================
 // COMPONENT B — Wide Pass (coverage: 1fps + LOW res, whole game)
 // =============================================================================
 
-const WIDE_PASS_PROMPT = `You are a basketball video analyst providing game segmentation data for a coaching tool.
+function buildWidePassPrompt(focusTeam: FocusTeam | null): string {
+  const teamBlock = focusTeam
+    ? `\nFOCUS TEAM: This scouting report is about ${focusTeamLabel(focusTeam)}.
+Use possession_type "defensive_sequence" ONLY for possessions where the OPPONENT of ${focusTeamLabel(focusTeam)} has the ball.\n`
+    : ''
+  return `You are a basketball video analyst providing game segmentation data for a coaching tool.
+${teamBlock}
 
 Watch this video clip and:
 1. List EVERY active basketball possession (live ball, game clock running)
@@ -351,6 +370,7 @@ RULES:
 - Omit only possessions under 2 seconds where the ball is clearly dead
 - If the entire clip is live gameplay, return one gameplay_range from 0.0 to clip end
 - Respond with ONLY the JSON object -- no markdown fences, no preamble, no explanation`
+}
 
 async function uploadAndPoll(
   filePath: string,
@@ -378,7 +398,8 @@ async function processWideChunk(
   chunk: VideoChunk,
   totalChunks: number,
   fileManager: GoogleAIFileManager,
-  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  focusTeam: FocusTeam | null
 ): Promise<PossessionSummary[]> {
   console.log(`[wide-pass] chunk ${chunk.index + 1}/${totalChunks} start (offset=${chunk.startOffset}s)`)
   let uploadedName: string | undefined
@@ -391,7 +412,7 @@ async function processWideChunk(
       const res = await model.generateContent({
         contents: [{ role: 'user', parts: [
           { fileData: { mimeType: 'video/mp4', fileUri: uri } },
-          { text: WIDE_PASS_PROMPT },
+          { text: buildWidePassPrompt(focusTeam) },
         ]}],
         generationConfig: {
           responseMimeType: 'application/json',
@@ -429,7 +450,8 @@ async function processWideChunk(
 async function processWidePass(
   videoPath: string,
   fileManager: GoogleAIFileManager,
-  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  focusTeam: FocusTeam | null
 ): Promise<{ summaries: PossessionSummary[]; chunkErrors: ChunkError[] }> {
   const chunks = await chunkVideo(videoPath)
   const acquire = createSemaphore(MAX_CONCURRENCY)
@@ -439,7 +461,7 @@ async function processWidePass(
   await Promise.all(chunks.map(async (chunk) => {
     const release = await acquire()
     try {
-      results[chunk.index] = await processWideChunk(chunk, chunks.length, fileManager, model)
+      results[chunk.index] = await processWideChunk(chunk, chunks.length, fileManager, model, focusTeam)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[wide-pass] chunk ${chunk.index} FAILED (non-fatal): ${msg}`)
@@ -459,9 +481,15 @@ async function processWidePass(
 // COMPONENT C — Deep Pass (per-possession JPEG burst, inline inlineData, no File API)
 // =============================================================================
 
-function buildDeepBurstPrompt(possessionId: number, startTs: number, endTs: number, frameCount: number): string {
+function buildDeepBurstPrompt(possessionId: number, startTs: number, endTs: number, frameCount: number, focusTeam: FocusTeam | null): string {
+  const teamBlock = focusTeam
+    ? `\nPERSPECTIVE: This report is for the coach of ${focusTeamLabel(focusTeam)} — the FOCUS TEAM.
+- If the focus team has the ball: describe THEIR offense.
+- If the opponent has the ball: emphasize how the focus team DEFENDS (the defense fields describe the focus team).
+- Write what_it_means and coaching_point as advice to the focus team's coach.\n`
+    : ''
   return `Basketball film analyst. ${frameCount} ordered frames, possession ${possessionId}, game time ${startTs.toFixed(1)}s–${endTs.toFixed(1)}s.
-
+${teamBlock}
 RULES (all mandatory):
 1. Only describe what is physically visible. Never invent.
 2. Use "appears to"/"seems to" for anything inferred.
@@ -546,7 +574,8 @@ async function analyzeOnePossession(
   videoDuration: number,
   possessionIndex: number,
   totalPossessions: number,
-  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  focusTeam: FocusTeam | null
 ): Promise<{ possession: PossessionResult; sequence: SequenceResult } | null> {
   const peakTs     = findPeakMotion(motionScores, possession.startTs, possession.endTs)
   const burstStart = Math.max(0, peakTs - BURST_BEFORE)
@@ -564,7 +593,7 @@ async function analyzeOnePossession(
     return null
   }
 
-  const prompt = buildDeepBurstPrompt(possession.possessionId, possession.startTs, possession.endTs, frames.length)
+  const prompt = buildDeepBurstPrompt(possession.possessionId, possession.startTs, possession.endTs, frames.length, focusTeam)
   const imageParts = frames.map(b64 => ({ inlineData: { mimeType: 'image/jpeg', data: b64 } }))
 
   const rawText = await withRetry(`possession ${possessionIndex} deep`, async () => {
@@ -675,7 +704,8 @@ async function processDeepPass(
   motionScores: MotionScore[],
   videoPath: string,
   videoDuration: number,
-  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  focusTeam: FocusTeam | null
 ): Promise<{ possessions: PossessionResult[]; sequences: SequenceResult[] }> {
   const acquire = createSemaphore(DEEP_CONCURRENCY)
   const results: ({ possession: PossessionResult; sequence: SequenceResult } | null)[] =
@@ -685,7 +715,7 @@ async function processDeepPass(
     const release = await acquire()
     try {
       results[i] = await analyzeOnePossession(
-        poss, motionScores, videoPath, videoDuration, i, wideSummaries.length, model
+        poss, motionScores, videoPath, videoDuration, i, wideSummaries.length, model, focusTeam
       )
     } catch (err) {
       console.error(`[deep-pass] possession ${i + 1} FAILED: ${err}`)
@@ -716,9 +746,16 @@ async function processDeepPass(
 // SYNTHESIS — text-only pass over kept possession records
 // =============================================================================
 
-function buildSynthesisPrompt(possessionCount: number, inputJson: string): string {
+function buildSynthesisPrompt(possessionCount: number, inputJson: string, focusTeam: FocusTeam | null): string {
+  const teamBlock = focusTeam
+    ? `\nPERSPECTIVE: Every part of this report is about ${focusTeamLabel(focusTeam)} — the FOCUS TEAM.
+- offensive_tendencies: how the focus team plays when THEY have the ball
+- defensive_tendencies: how the focus team defends when the opponent has the ball
+- possible_weaknesses and coaching_takeaways: about the focus team, written for THEIR coach
+- game_narrative: a scouting report on the focus team specifically\n`
+    : ''
   return `You are a basketball analyst synthesizing a scouting report from verified possession data.
-
+${teamBlock}
 You have been given ${possessionCount} analyzed possessions from a basketball game clip.
 Each possession was verified by a frame-by-frame video analysis pass. Your job is to
 synthesize patterns, tendencies, and coaching insights across ALL possessions.
@@ -887,7 +924,8 @@ function emptySynthesisDefaults(): ReturnType<typeof mapSynthesisToResult> {
 
 async function runSynthesis(
   possessions: PossessionResult[],
-  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>
+  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  focusTeam: FocusTeam | null
 ): Promise<ReturnType<typeof mapSynthesisToResult>> {
   if (possessions.length === 0) return emptySynthesisDefaults()
 
@@ -902,7 +940,7 @@ async function runSynthesis(
   }))
 
   const inputJson = JSON.stringify(synthesisInput, null, 2)
-  const prompt    = buildSynthesisPrompt(possessions.length, inputJson)
+  const prompt    = buildSynthesisPrompt(possessions.length, inputJson, focusTeam)
 
   console.log(`[synthesis] running on ${possessions.length} possessions...`)
 
@@ -952,13 +990,17 @@ async function runSynthesis(
 export async function analyzeVideoWithGemini(
   videoPath: string,
   focusPlayer?: FocusPlayer | null,
-  videoDurationSeconds?: number
+  videoDurationSeconds?: number,
+  focusTeam?: FocusTeam | null
 ): Promise<AnalysisResult & { chunkErrors: ChunkError[] }> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('[gemini-video-analyzer] GEMINI_API_KEY is not set. Add it to .env.local.')
   const genAI = new GoogleGenerativeAI(apiKey)
   const fileManager = new GoogleAIFileManager(apiKey)
   const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
+  const team = focusTeam ?? null
+  if (team) console.log(`[analyzer] focus team: ${focusTeamLabel(team)}`)
+  else console.log('[analyzer] no focus team set — analysis is team-agnostic')
 
   // Component A — motion scan (free, no API call)
   console.log('[motion-scan] scanning full video for motion...')
@@ -967,7 +1009,7 @@ export async function analyzeVideoWithGemini(
   console.log(`[motion-scan] done: ${motionScores.length}s scanned, ${highActionCount} high-action seconds`)
 
   // Component B — wide pass (all possessions, 1fps LOW res)
-  const { summaries: wideSummaries, chunkErrors } = await processWidePass(videoPath, fileManager, model)
+  const { summaries: wideSummaries, chunkErrors } = await processWidePass(videoPath, fileManager, model, team)
   console.log(`[wide-pass] total possessions across all chunks: ${wideSummaries.length}`)
 
   if (wideSummaries.length === 0) {
@@ -989,7 +1031,7 @@ export async function analyzeVideoWithGemini(
 
   // Component C — deep pass (per-possession burst)
   const { possessions, sequences } = await processDeepPass(
-    wideSummaries, motionScores, videoPath, videoDuration, model
+    wideSummaries, motionScores, videoPath, videoDuration, model, team
   )
   console.log(
     `[deep-pass] kept ${possessions.length}/${wideSummaries.length} possessions` +
@@ -997,7 +1039,7 @@ export async function analyzeVideoWithGemini(
   )
 
   // Synthesis — text-only pass over kept possession records
-  const synthesis = await runSynthesis(possessions, model)
+  const synthesis = await runSynthesis(possessions, model, team)
 
   const computedStats = computeStats(sequences, possessions)
 

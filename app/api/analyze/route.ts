@@ -5,7 +5,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { cleanupTempFile } from '@/lib/tempFiles'
-import type { FocusPlayer } from '@/lib/types'
+import type { FocusPlayer, FocusTeam } from '@/lib/types'
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -18,6 +18,7 @@ interface UploadedFile {
   fileName: string
   mimeType: string
   focusPlayer: FocusPlayer | null
+  focusTeam: FocusTeam | null
 }
 
 async function parseUpload(request: NextRequest): Promise<UploadedFile> {
@@ -28,6 +29,7 @@ async function parseUpload(request: NextRequest): Promise<UploadedFile> {
     let fileName = 'upload.mp4'
     let mimeType = 'video/mp4'
     let focusPlayerStr: string | null = null
+    let focusTeamStr: string | null = null
     const writes: Promise<void>[] = []
 
     busboy.on('file', (fieldname, fileStream, info) => {
@@ -47,6 +49,7 @@ async function parseUpload(request: NextRequest): Promise<UploadedFile> {
 
     busboy.on('field', (fieldname, value) => {
       if (fieldname === 'focusPlayer') focusPlayerStr = value
+      if (fieldname === 'focusTeam') focusTeamStr = value
     })
 
     busboy.on('finish', async () => {
@@ -58,6 +61,7 @@ async function parseUpload(request: NextRequest): Promise<UploadedFile> {
           fileName,
           mimeType,
           focusPlayer: focusPlayerStr ? (JSON.parse(focusPlayerStr) as FocusPlayer) : null,
+          focusTeam: focusTeamStr ? (JSON.parse(focusTeamStr) as FocusTeam) : null,
         })
       } catch (err) {
         reject(err)
@@ -74,7 +78,7 @@ async function processAnalysis(
   upload: UploadedFile,
   send: (e: object) => Promise<void>
 ): Promise<void> {
-  const { videoPath, fileName, mimeType, focusPlayer } = upload
+  const { videoPath, fileName, mimeType, focusPlayer, focusTeam } = upload
 
   try {
     const allowedTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm']
@@ -88,7 +92,7 @@ async function processAnalysis(
 
     await send({ type: 'progress', pct: 15, message: 'Chunking video for Gemini...' })
     const { analyzeVideoWithGemini } = await import('@/lib/analyzers/gemini-video-analyzer')
-    const analysis = await analyzeVideoWithGemini(videoPath, focusPlayer)
+    const analysis = await analyzeVideoWithGemini(videoPath, focusPlayer, undefined, focusTeam)
 
     await send({ type: 'progress', pct: 85, message: 'Saving analysis...' })
 

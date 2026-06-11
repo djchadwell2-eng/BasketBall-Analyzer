@@ -101,6 +101,12 @@ export interface GameIdentity {
   primaryWeaknesses: string[]
 }
 
+export interface FocusTeam {
+  /** Jersey color as the coach would describe it, e.g. "white", "navy blue" */
+  jerseyColor: string
+  teamName?: string
+}
+
 export interface FocusPlayer {
   jerseyNumber: string
   jerseyColor: string
