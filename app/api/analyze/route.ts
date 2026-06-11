@@ -204,7 +204,7 @@ async function processAnalysis(
         console.log('[analyze] Step 7 OK — all possessions inserted')
         await send({ type: 'progress', pct: 95, message: 'Saving game patterns...' })
 
-        const { error: patternError } = await supabase.from('game_patterns').insert({
+        const patternRow = {
           video_id: videoId,
           pattern_insights: analysis.patternInsights,
           offensive_tendencies: analysis.offensiveTendencies,
@@ -214,7 +214,17 @@ async function processAnalysis(
           strategic_adjustments: analysis.strategicAdjustments,
           ranked_observations: analysis.rankedObservations,
           computed_stats: analysis.computedStats,
+        }
+        let { error: patternError } = await supabase.from('game_patterns').insert({
+          ...patternRow,
+          game_plan: analysis.gamePlan,
         })
+        if (patternError && /game_plan/.test(patternError.message)) {
+          // Column not migrated yet — save everything else rather than losing the row.
+          // Migration: alter table game_patterns add column game_plan jsonb;
+          console.warn('[analyze] game_plan column missing — run the migration in supabase/migrations. Saving without it.')
+          ;({ error: patternError } = await supabase.from('game_patterns').insert(patternRow))
+        }
         if (patternError) console.error('[analyze] Step 8 FAILED — game_patterns insert:', patternError.message)
         else console.log('[analyze] Step 8 OK — game patterns inserted')
 
@@ -259,6 +269,7 @@ async function processAnalysis(
         defensiveTendencies: analysis.defensiveTendencies,
         transitionAnalysis: analysis.transitionAnalysis,
         gameIdentity: analysis.gameIdentity,
+        gamePlan: analysis.gamePlan,
         playerReport: analysis.playerReport ?? null,
         strategicAdjustments: analysis.strategicAdjustments,
         rankedObservations: analysis.rankedObservations,

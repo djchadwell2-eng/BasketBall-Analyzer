@@ -6,7 +6,7 @@ import VideoUpload from '@/components/VideoUpload'
 import AnalysisTabs from '@/components/AnalysisTabs'
 import FocusTeamSelector from '@/components/FocusTeamSelector'
 import { supabase } from '@/lib/supabase'
-import type { PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation, FocusTeam } from '@/lib/types'
+import type { PlayerReport as PlayerReportType, StrategicAdjustment, PatternInsight, TendencyItem, GameIdentity, RankedObservation, FocusTeam, GamePlan } from '@/lib/types'
 import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
 
 type AppState = 'idle' | 'uploading' | 'extracting' | 'analyzing' | 'done' | 'error'
@@ -26,6 +26,7 @@ export default function HomePage() {
   const [defensiveTendencies, setDefensiveTendencies] = useState<TendencyItem[]>([])
   const [transitionAnalysis, setTransitionAnalysis] = useState('')
   const [gameIdentity, setGameIdentity] = useState<GameIdentity | null>(null)
+  const [gamePlan, setGamePlan] = useState<GamePlan | null>(null)
   const [reportText, setReportText] = useState('')
   const [model, setModel] = useState('')
   const [frameCount, setFrameCount] = useState(0)
@@ -55,6 +56,7 @@ export default function HomePage() {
     setDefensiveTendencies([])
     setTransitionAnalysis('')
     setGameIdentity(null)
+    setGamePlan(null)
     setReportText('')
     setModel('')
     setFrameCount(0)
@@ -132,6 +134,7 @@ export default function HomePage() {
             setDefensiveTendencies((d.defensiveTendencies as typeof defensiveTendencies) ?? [])
             setTransitionAnalysis((d.transitionAnalysis as string) ?? '')
             setGameIdentity((d.gameIdentity as typeof gameIdentity) ?? null)
+            setGamePlan((d.gamePlan as typeof gamePlan) ?? null)
             const a = (d.analysis as { summary?: string; model?: string; frameCount?: number }) ?? {}
             setReportText(a.summary ?? '')
             setModel(a.model ?? '')
@@ -164,6 +167,7 @@ export default function HomePage() {
     setDefensiveTendencies([])
     setTransitionAnalysis('')
     setGameIdentity(null)
+    setGamePlan(null)
     setReportText('')
     setModel('')
     setFrameCount(0)
@@ -387,6 +391,7 @@ export default function HomePage() {
               defensiveTendencies={defensiveTendencies}
               transitionAnalysis={transitionAnalysis}
               gameIdentity={gameIdentity}
+              gamePlan={gamePlan}
               strategicAdjustments={strategicAdjustments}
               rankedObservations={rankedObservations}
               playerReport={playerReport}

@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import TitleEditor from '@/components/TitleEditor'
 import AnalysisTabs from '@/components/AnalysisTabs'
 import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
-import type { PatternInsight, TendencyItem, GameIdentity, BasketballEvent, PlayerReport as PlayerReportType, PlayerEvent, StrategicAdjustment, RankedObservation } from '@/lib/types'
+import type { PatternInsight, TendencyItem, GameIdentity, BasketballEvent, PlayerReport as PlayerReportType, PlayerEvent, StrategicAdjustment, RankedObservation, GamePlan } from '@/lib/types'
 
 export const revalidate = 0
 
@@ -38,7 +38,9 @@ export default async function HistoryDetailPage({ params }: Props) {
       .order('possession_id', { ascending: true }),
     supabase
       .from('game_patterns')
-      .select('pattern_insights, offensive_tendencies, defensive_tendencies, transition_analysis, game_identity, strategic_adjustments, ranked_observations')
+      // select * so the query keeps working whether or not the game_plan
+      // column migration has been run yet
+      .select('*')
       .eq('video_id', id)
       .maybeSingle(),
     supabase
@@ -122,6 +124,7 @@ export default async function HistoryDetailPage({ params }: Props) {
   const rankedObservations: RankedObservation[] = Array.isArray(patternRow?.ranked_observations)
     ? (patternRow.ranked_observations as RankedObservation[])
     : []
+  const gamePlan: GamePlan | null = (patternRow?.game_plan as GamePlan) ?? null
 
   const playerReport: PlayerReportType | null = playerRow ? {
     jerseyNumber: playerRow.jersey_number as string,
@@ -180,6 +183,7 @@ export default async function HistoryDetailPage({ params }: Props) {
           defensiveTendencies={defensiveTendencies}
           transitionAnalysis={transitionAnalysis}
           gameIdentity={gameIdentity}
+          gamePlan={gamePlan}
           strategicAdjustments={strategicAdjustments}
           rankedObservations={rankedObservations}
           playerReport={playerReport}

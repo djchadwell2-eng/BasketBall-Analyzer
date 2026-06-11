@@ -19,12 +19,16 @@ import type {
   RankedObservation,
   GameIdentity,
   StrategicAdjustment,
+  GamePlan,
+  GamePlanKey,
 } from '../types'
 import type {
   PossessionSummary,
   RawWideResponse,
   RawDeepPossession,
   RawSynthesisOutput,
+  RawGamePlan,
+  RawGamePlanKey,
   ChunkError,
 } from './gemini-video-analyzer.types'
 
@@ -45,7 +49,7 @@ export const BURST_BEFORE = 1.0  // seconds before peak motion to start burst
 export const BURST_AFTER  = 2.0  // seconds after peak motion to end burst
 const BURST_FRAME_CAP     = 15   // hard max frames per burst
 const DEEP_MAX_OUTPUT_TOKENS     = 8000
-const SYNTHESIS_MAX_OUTPUT_TOKENS = 6000
+const SYNTHESIS_MAX_OUTPUT_TOKENS = 8000  // includes the game_plan section
 
 const MAX_CONCURRENCY  = 4  // wide-pass (1 video request per chunk)
 const DEEP_CONCURRENCY = 4  // deep-pass — raise to 6 or 8 if 503s stay low
@@ -777,6 +781,15 @@ SYNTHESIS RULES -- FOLLOW STRICTLY
    "may have difficulty...") unless the evidence across multiple possessions is clear.
 6. game_narrative: 2-3 paragraphs suitable for a scouting report.
    Factual, specific, grounded only in what the data shows. No filler language.
+7. game_plan: written for a coach PREPARING TO PLAY AGAINST the analyzed team.
+   - offensive_keys: how to attack this team when YOU have the ball -- target the
+     weaknesses and defensive habits visible in the data
+   - defensive_keys: how to take away what this team does best on offense
+   - tempo_advice: should an opponent run with this team or slow them down, and why
+   - matchup_notes: personnel or situational notes worth game-planning around
+   Every key must be grounded in the possession data (cite supporting_ts where possible).
+   Titles are short imperatives a coach would write on a whiteboard ("Pack the paint",
+   "Pressure the outlet"). Details are 1-3 specific sentences.
 
 Return ONLY valid JSON:
 {
@@ -796,7 +809,17 @@ Return ONLY valid JSON:
   "game_narrative": "2-3 paragraph scouting narrative grounded in the possession data.",
   "key_moments": [
     { "ts": 12.5, "why": "One sentence on why this moment is tactically significant" }
-  ]
+  ],
+  "game_plan": {
+    "offensive_keys": [
+      { "title": "Short whiteboard imperative", "detail": "1-3 specific sentences grounded in the data", "supporting_ts": [12.5] }
+    ],
+    "defensive_keys": [
+      { "title": "Short whiteboard imperative", "detail": "1-3 specific sentences grounded in the data", "supporting_ts": [] }
+    ],
+    "tempo_advice": "1-2 sentences on pace strategy against this team",
+    "matchup_notes": ["Personnel/situational note"]
+  }
 }
 
 ARRAY LENGTHS:
@@ -805,6 +828,7 @@ ARRAY LENGTHS:
 - possible_weaknesses: 1-4 items
 - coaching_takeaways: 3-6 items, each unique and specific
 - key_moments: 3-5 items; ts values MUST be start_ts values from the possession data
+- game_plan.offensive_keys: 2-4 items; game_plan.defensive_keys: 2-4 items; matchup_notes: 0-3 items
 
 Respond with ONLY the JSON object -- no markdown fences, no preamble, no commentary`
 }
@@ -830,6 +854,29 @@ function tendencyName(text: string): string {
     60
   )
   return text.slice(0, end).trim()
+}
+
+function parseGamePlanKeys(val: unknown): GamePlanKey[] {
+  if (!Array.isArray(val)) return []
+  return (val as RawGamePlanKey[])
+    .filter(k => typeof k === 'object' && k !== null && (k.title || k.detail))
+    .map(k => ({
+      title:  typeof k.title  === 'string' ? k.title  : '',
+      detail: typeof k.detail === 'string' ? k.detail : '',
+      supportingTimestamps: Array.isArray(k.supporting_ts)
+        ? (k.supporting_ts as unknown[]).filter((t): t is number => typeof t === 'number')
+        : [],
+    }))
+}
+
+function parseGamePlan(raw: RawGamePlan | undefined): GamePlan | null {
+  if (!raw || typeof raw !== 'object') return null
+  const offensiveKeys = parseGamePlanKeys(raw.offensive_keys)
+  const defensiveKeys = parseGamePlanKeys(raw.defensive_keys)
+  const tempoAdvice   = typeof raw.tempo_advice === 'string' ? raw.tempo_advice : ''
+  const matchupNotes  = toStringArray(raw.matchup_notes)
+  if (offensiveKeys.length === 0 && defensiveKeys.length === 0 && !tempoAdvice) return null
+  return { offensiveKeys, defensiveKeys, tempoAdvice, matchupNotes }
 }
 
 function mapSynthesisToResult(raw: RawSynthesisOutput) {
@@ -905,6 +952,7 @@ function mapSynthesisToResult(raw: RawSynthesisOutput) {
     rankedObservations,
     strategicAdjustments: [] as StrategicAdjustment[],
     gameIdentity,
+    gamePlan: parseGamePlan(raw.game_plan),
     narrativeSummary,
   }
 }
@@ -918,6 +966,7 @@ function emptySynthesisDefaults(): ReturnType<typeof mapSynthesisToResult> {
     rankedObservations:   [],
     strategicAdjustments: [],
     gameIdentity:         null,
+    gamePlan:             null,
     narrativeSummary:     '',
   }
 }
@@ -1019,7 +1068,7 @@ export async function analyzeVideoWithGemini(
       frameCount: videoDurationSeconds ?? motionScores.length,
       sequences: [], possessions: [],
       patternInsights: [], offensiveTendencies: [], defensiveTendencies: [],
-      transitionAnalysis: '', gameIdentity: null, playerReport: null,
+      transitionAnalysis: '', gameIdentity: null, gamePlan: null, playerReport: null,
       strategicAdjustments: [], rankedObservations: [],
       computedStats: computeStats([], []),
       chunkErrors,
@@ -1068,6 +1117,7 @@ export async function analyzeVideoWithGemini(
     defensiveTendencies:  synthesis.defensiveTendencies,
     transitionAnalysis:   synthesis.transitionAnalysis,
     gameIdentity:         synthesis.gameIdentity,
+    gamePlan:             synthesis.gamePlan,
     // TODO: focus-player tracking not yet implemented in the Gemini cascade —
     // the UI input is hidden until this produces a real report.
     playerReport: null,

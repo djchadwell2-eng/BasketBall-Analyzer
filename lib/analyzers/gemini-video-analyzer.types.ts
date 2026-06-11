@@ -113,6 +113,19 @@ export interface RawDeepPossession {
   pattern_context?: string
 }
 
+export interface RawGamePlanKey {
+  title?: string
+  detail?: string
+  supporting_ts?: unknown
+}
+
+export interface RawGamePlan {
+  offensive_keys?: unknown
+  defensive_keys?: unknown
+  tempo_advice?: string
+  matchup_notes?: unknown
+}
+
 export interface RawSynthesisOutput {
   offensive_tendencies?: unknown
   defensive_tendencies?: unknown
@@ -121,4 +134,5 @@ export interface RawSynthesisOutput {
   coaching_takeaways?: unknown
   game_narrative?: string
   key_moments?: unknown
+  game_plan?: RawGamePlan
 }

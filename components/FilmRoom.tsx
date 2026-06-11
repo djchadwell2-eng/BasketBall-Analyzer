@@ -1,9 +1,11 @@
 'use client'
 
-import { useRef, useState, useEffect } from 'react'
-import { Play, Clock, ChevronRight, Zap, ArrowRight, Target, Eye, RefreshCw, ChevronDown } from 'lucide-react'
-import AnalysisSummary from './AnalysisSummary'
+import { useRef, useState, useEffect, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Play, Eye, ArrowRight, Target, Zap, RefreshCw } from 'lucide-react'
 
+// These types are re-exported here because several pages/components import
+// them from './FilmRoom' — keep them in sync with lib/types.ts.
 export interface SequenceResult {
   sequenceIndex: number
   possessionId: number
@@ -70,20 +72,7 @@ interface Props {
   analyzedAt?: string
 }
 
-// ── Color constants (light theme) ─────────────────────────────────────────────
-
-const PLAY_TYPE_COLORS: Record<string, string> = {
-  'Transition':          'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  'Half-court offense':  'text-violet-400 bg-violet-500/10 border-violet-500/20',
-  'Pick-and-roll':       'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  'Post-up':             'text-orange-400 bg-orange-500/10 border-orange-500/20',
-  'Defense rotation':    'text-red-400 bg-red-500/10 border-red-500/20',
-  'Full-court press':    'text-red-400 bg-red-500/10 border-red-500/20',
-  'Set play':            'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-  'Fast break':          'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  'Iso':                 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  'Press break':         'text-teal-400 bg-teal-500/10 border-teal-500/20',
-}
+// ── Lookup tables ─────────────────────────────────────────────────────────────
 
 const POSSESSION_TYPE_LABELS: Record<string, string> = {
   'transition': 'Transition',
@@ -101,7 +90,7 @@ const POSSESSION_TYPE_LABELS: Record<string, string> = {
 }
 
 const POSSESSION_TYPE_COLORS: Record<string, string> = {
-  'transition':             'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  'transition':             'text-sky-400 bg-sky-500/10 border-sky-500/20',
   'half_court':             'text-violet-400 bg-violet-500/10 border-violet-500/20',
   'defensive_sequence':     'text-red-400 bg-red-500/10 border-red-500/20',
   'special_situation':      'text-amber-400 bg-amber-500/10 border-amber-500/20',
@@ -115,30 +104,20 @@ const POSSESSION_TYPE_COLORS: Record<string, string> = {
   'sideline_out_of_bounds': 'text-slate-400 bg-slate-500/10 border-slate-500/20',
 }
 
-// Used in the active sequence card (left panel)
-const OUTCOME_COLORS: Record<string, string> = {
-  'made':           'text-emerald-400',
-  'missed':         'text-red-400',
-  'turnover':       'text-amber-400',
-  'defensive-stop': 'text-blue-400',
-  'unknown':        'text-gray-500',
+const OUTCOME_META: Record<string, { label: string; dot: string; text: string }> = {
+  'made':           { label: 'Made',     dot: 'bg-emerald-400', text: 'text-emerald-400' },
+  'missed':         { label: 'Missed',   dot: 'bg-red-400',     text: 'text-red-400' },
+  'turnover':       { label: 'Turnover', dot: 'bg-amber-400',   text: 'text-amber-400' },
+  'defensive-stop': { label: 'Stop',     dot: 'bg-sky-400',     text: 'text-sky-400' },
 }
 
-// Used in the expanded possession breakdown badge (right panel)
-const OUTCOME_BADGE: Record<string, { label: string; cls: string }> = {
-  'made':           { label: 'Made',     cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
-  'missed':         { label: 'Missed',   cls: 'text-red-400 bg-red-500/10 border-red-500/20' },
-  'turnover':       { label: 'Turnover', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
-  'defensive-stop': { label: 'Stop',     cls: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
-}
-
-function playTypeBadgeClass(playType: string): string {
-  return PLAY_TYPE_COLORS[playType] ?? 'text-slate-400 bg-slate-500/10 border-slate-500/20'
-}
-
-function possessionBadgeClass(type: string): string {
-  return POSSESSION_TYPE_COLORS[type] ?? 'text-slate-400 bg-slate-500/10 border-slate-500/20'
-}
+const FILTERS: { id: string; label: string }[] = [
+  { id: 'all',            label: 'All' },
+  { id: 'made',           label: 'Made' },
+  { id: 'missed',         label: 'Missed' },
+  { id: 'turnover',       label: 'TO' },
+  { id: 'defensive-stop', label: 'Stops' },
+]
 
 function formatTimestamp(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -146,26 +125,26 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-// ── Active-sequence coaching breakdown (left panel) ───────────────────────────
+function badgeClass(type: string): string {
+  return POSSESSION_TYPE_COLORS[type] ?? 'text-slate-400 bg-slate-500/10 border-slate-500/20'
+}
 
-interface CoachingSectionProps {
+// ── Detail panel sections ─────────────────────────────────────────────────────
+
+function BreakdownRow({ icon, label, text, accent }: {
   icon: React.ReactNode
   label: string
   text: string
   accent?: boolean
-}
-
-function CoachingSection({ icon, label, text, accent }: CoachingSectionProps) {
+}) {
   if (!text) return null
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        <span className={accent ? 'text-orange-400' : 'text-gray-500'}>{icon}</span>
-        <span className={`text-[9px] font-bold tracking-[0.18em] uppercase ${accent ? 'text-orange-400' : 'text-gray-500'}`}>
-          {label}
-        </span>
+    <div>
+      <div className={`flex items-center gap-1.5 mb-1.5 ${accent ? 'text-orange-400' : 'text-gray-500'}`}>
+        {icon}
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase">{label}</span>
       </div>
-      <p className={`text-xs leading-relaxed pl-5 ${accent ? 'text-orange-300' : 'text-gray-400'}`}>
+      <p className={`text-sm leading-relaxed ${accent ? 'text-orange-200' : 'text-gray-300'}`}>
         {text}
       </p>
     </div>
@@ -174,13 +153,14 @@ function CoachingSection({ icon, label, text, accent }: CoachingSectionProps) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function FilmRoom({ videoUrl, sequences, possessions = [], reportText, model, frameCount, analyzedAt }: Props) {
+export default function FilmRoom({ videoUrl, sequences, possessions = [], model, frameCount, analyzedAt }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [activeSeq, setActiveSeq] = useState<number | null>(null)
-  const [expandedPossessions, setExpandedPossessions] = useState<Set<number>>(new Set([0]))
-  const [showReport, setShowReport] = useState(false)
+  const [selectedId, setSelectedId] = useState<number | null>(possessions[0]?.possessionId ?? null)
+  const [filter, setFilter] = useState('all')
   const [videoError, setVideoError] = useState(false)
 
+  // Cross-tab "jump to film": the Scouting Report / Game Plan dispatch
+  // seekFilm with a timestamp after AnalysisTabs switches back to this tab.
   useEffect(() => {
     function handleSeekFilm(e: Event) {
       const { timestamp } = (e as CustomEvent<{ timestamp: number }>).detail
@@ -188,54 +168,58 @@ export default function FilmRoom({ videoUrl, sequences, possessions = [], report
         videoRef.current.currentTime = timestamp
         videoRef.current.play()
       }
+      const hit = possessions.find(p => timestamp >= p.startTimestamp && timestamp <= p.endTimestamp)
+        ?? possessions.find(p => p.startTimestamp >= timestamp)
+      if (hit) setSelectedId(hit.possessionId)
     }
     window.addEventListener('seekFilm', handleSeekFilm)
     return () => window.removeEventListener('seekFilm', handleSeekFilm)
-  }, [])
+  }, [possessions])
 
-  function seekTo(timestampStart: number) {
+  // ONE click: seek the video to the possession AND show its full breakdown
+  // in the panel under the video. Nothing toggles, nothing collapses, the
+  // video position is never reset by UI state.
+  function selectPossession(pos: PossessionResult) {
+    setSelectedId(pos.possessionId)
     if (videoRef.current) {
-      videoRef.current.currentTime = timestampStart
+      videoRef.current.currentTime = pos.startTimestamp
       videoRef.current.play()
     }
   }
 
-  function handlePossessionClick(pos: PossessionResult) {
-    seekTo(pos.startTimestamp)
-    setExpandedPossessions(prev => {
-      const next = new Set(prev)
-      if (next.has(pos.possessionId)) {
-        next.delete(pos.possessionId)
-      } else {
-        next.add(pos.possessionId)
-      }
-      return next
-    })
+  const filtered = useMemo(
+    () => (filter === 'all' ? possessions : possessions.filter(p => p.outcome === filter)),
+    [possessions, filter]
+  )
+
+  const selected = possessions.find(p => p.possessionId === selectedId) ?? null
+  // Each possession carries one deep-pass sequence with the rich breakdown
+  const seq = selected?.sequences[0] ?? null
+  const offenseObs = selected?.keyObservations.find(o => o.startsWith('OFFENSE: '))?.slice(9) ?? null
+  const defenseObs = selected?.keyObservations.find(o => o.startsWith('DEFENSE: '))?.slice(9) ?? null
+  const outcome = selected ? OUTCOME_META[selected.outcome] ?? null : null
+
+  // Legacy fallback: very old analyses have sequences but no possessions
+  if (possessions.length === 0 && sequences.length > 0) {
+    return (
+      <div className="text-center py-16 text-sm text-gray-500">
+        This game was analyzed with an older pipeline — re-analyze the footage to
+        get the full Film Room experience.
+      </div>
+    )
   }
-
-  function handleSequenceClick(seq: SequenceResult) {
-    setActiveSeq(seq.sequenceIndex)
-    seekTo(seq.timestampStart)
-  }
-
-  const hasPossessions = possessions.length > 0
-  const hasSequences = sequences.length > 0
-  const activeSequence = sequences.find(s => s.sequenceIndex === activeSeq) ?? null
-
-  const hasRichBreakdown = (seq: SequenceResult) =>
-    Boolean(seq.whatHappened || seq.whatItMeans || seq.whyItMatters || seq.coachingPoint)
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-8 items-start">
+    <div className="grid grid-cols-1 lg:grid-cols-[7fr_3fr] gap-8 items-start">
 
-      {/* ── Left — Video + active sequence card (sticky) ───────────────── */}
-      <div className="lg:sticky lg:top-6 space-y-4">
-        <p className="text-[11px] font-semibold text-orange-600 tracking-[0.22em] uppercase">
-          Game Film
-        </p>
+      {/* ── Left — video + broadcast detail panel ─────────────────── */}
+      <div className="space-y-5 min-w-0">
 
         {videoUrl && !videoError ? (
-          <video
+          <motion.video
+            initial={{ opacity: 0, scale: 0.985 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.4 }}
             ref={videoRef}
             src={videoUrl}
             controls
@@ -253,361 +237,183 @@ export default function FilmRoom({ videoUrl, sequences, possessions = [], report
           </div>
         )}
 
-        {/* Stats row */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[11px] text-gray-600 font-mono">
+        {/* Meta line */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-600 font-mono">
           {model && <span>{model}</span>}
-          {frameCount !== undefined && <><span className="text-gray-700">·</span><span>{frameCount} frames</span></>}
-          {hasPossessions && <><span className="text-gray-700">·</span><span>{possessions.length} possessions</span></>}
+          {possessions.length > 0 && <><span className="text-gray-700">·</span><span>{possessions.length} possessions</span></>}
+          {frameCount !== undefined && frameCount > 0 && <><span className="text-gray-700">·</span><span>{frameCount}s of film</span></>}
           {analyzedAt && (
             <><span className="text-gray-700">·</span>
-            <span>{new Date(analyzedAt).toLocaleDateString()} {new Date(analyzedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></>
+            <span>{new Date(analyzedAt).toLocaleDateString()}</span></>
           )}
         </div>
 
-        {/* Active sequence detail card */}
-        {activeSequence && (
-          <div className="rounded-2xl border border-orange-500/20 bg-orange-500/[0.04] overflow-hidden shadow-lg shadow-orange-900/10">
-            {activeSequence.thumbnail && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={`data:image/jpeg;base64,${activeSequence.thumbnail}`}
-                alt={`Sequence ${activeSequence.sequenceIndex + 1}`}
-                className="w-full object-cover max-h-44"
-              />
-            )}
-            <div className="p-4 space-y-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={`text-[10px] font-bold tracking-wider uppercase px-2.5 py-1 rounded-full border ${playTypeBadgeClass(activeSequence.playType)}`}>
-                  {activeSequence.playType}
+        {/* ── Broadcast lower-third: the selected possession ───────── */}
+        <AnimatePresence mode="wait">
+          {selected && (
+            <motion.div
+              key={selected.possessionId}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.04] to-white/[0.015] overflow-hidden"
+            >
+              {/* Header strip */}
+              <div className="flex items-center gap-3 px-5 py-3.5 border-b border-white/[0.06] bg-black/30">
+                <span className="font-display text-2xl font-bold text-orange-500 leading-none">
+                  #{selected.possessionId + 1}
                 </span>
-                <span className="text-xs font-mono text-gray-500">
-                  {formatTimestamp(activeSequence.timestampStart)} → {formatTimestamp(activeSequence.timestampEnd)}
+                <span className={`text-[10px] font-bold tracking-wider uppercase px-2.5 py-1 rounded-full border ${badgeClass(selected.possessionType)}`}>
+                  {POSSESSION_TYPE_LABELS[selected.possessionType] ?? selected.possessionType}
                 </span>
-                {activeSequence.outcome !== 'unknown' && (
-                  <span className={`text-[10px] font-bold uppercase ${OUTCOME_COLORS[activeSequence.outcome]}`}>
-                    · {activeSequence.outcome}
+                {outcome && (
+                  <span className={`flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide ${outcome.text}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${outcome.dot}`} />
+                    {outcome.label}
                   </span>
                 )}
+                <span className="ml-auto font-mono text-xs text-gray-500">
+                  {formatTimestamp(selected.startTimestamp)} → {formatTimestamp(selected.endTimestamp)}
+                </span>
               </div>
 
-              {hasRichBreakdown(activeSequence) ? (
-                <div className="space-y-4 divide-y divide-white/[0.06]">
-                  <CoachingSection icon={<Eye size={10} />} label="What Happened" text={activeSequence.whatHappened} />
-                  {activeSequence.whatItMeans && (
-                    <div className="pt-3">
-                      <CoachingSection icon={<ArrowRight size={10} />} label="What It Means" text={activeSequence.whatItMeans} />
-                    </div>
-                  )}
-                  {activeSequence.whyItMatters && (
-                    <div className="pt-3">
-                      <CoachingSection icon={<Target size={10} />} label="Why It Matters" text={activeSequence.whyItMatters} />
-                    </div>
-                  )}
-                  {activeSequence.coachingPoint && (
-                    <div className="pt-3">
-                      <CoachingSection icon={<Zap size={10} />} label="Coaching Point" text={activeSequence.coachingPoint} accent />
-                    </div>
-                  )}
-                  {activeSequence.patternContext && (
-                    <div className="pt-3">
-                      <CoachingSection icon={<RefreshCw size={10} />} label="Pattern Context" text={activeSequence.patternContext} />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-sm text-gray-400 leading-relaxed">{activeSequence.summary}</p>
-                  {activeSequence.coachingTakeaway && (
-                    <div className="flex gap-2.5 pt-1">
-                      <Zap size={13} className="text-orange-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-orange-300 leading-relaxed">{activeSequence.coachingTakeaway}</p>
-                    </div>
-                  )}
-                </div>
-              )}
+              <div className="p-5 space-y-5">
+                {/* Coaching insight — the headline, finally readable */}
+                {selected.coachingInsight && (
+                  <p className="text-[15px] font-semibold text-white leading-relaxed">
+                    {selected.coachingInsight}
+                  </p>
+                )}
 
-              {activeSequence.tags && activeSequence.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {activeSequence.tags.map((tag) => (
-                    <span key={tag} className="text-[9px] font-medium text-gray-500 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-full">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+                {/* Rich deep-pass breakdown */}
+                {seq && (seq.whatHappened || seq.whatItMeans || seq.whyItMatters || seq.coachingPoint) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 pt-1">
+                    <BreakdownRow icon={<Eye size={11} />} label="What happened" text={seq.whatHappened} />
+                    <BreakdownRow icon={<ArrowRight size={11} />} label="What it means" text={seq.whatItMeans} />
+                    <BreakdownRow icon={<Target size={11} />} label="Why it matters" text={seq.whyItMatters} />
+                    <BreakdownRow icon={<Zap size={11} />} label="Coaching point" text={seq.coachingPoint} accent />
+                  </div>
+                )}
 
-      {/* ── Right — Possession timeline + report ───────────────────────── */}
-      <div className="space-y-4">
+                {seq?.patternContext && (
+                  <BreakdownRow icon={<RefreshCw size={11} />} label="Pattern context" text={seq.patternContext} />
+                )}
 
-        {hasPossessions ? (
-          <>
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-orange-600 tracking-[0.22em] uppercase">
-                Possessions
-              </p>
-              <span className="text-[10px] text-gray-600">
-                {possessions.length} possessions · {sequences.length} sequences
-              </span>
-            </div>
-
-            {/* Possession-grouped timeline */}
-            <div className="space-y-2">
-              {possessions.map((pos) => {
-                const isExpanded = expandedPossessions.has(pos.possessionId)
-                const posLabel = POSSESSION_TYPE_LABELS[pos.possessionType] ?? pos.possessionType
-                // Pre-compute for the expanded breakdown
-                const offenseObs = pos.keyObservations.find(o => o.startsWith('OFFENSE: '))?.slice(9) ?? null
-                const defenseObs = pos.keyObservations.find(o => o.startsWith('DEFENSE: '))?.slice(9) ?? null
-                const outcomeBadge = OUTCOME_BADGE[pos.outcome] ?? null
-                const hasBreakdown = !!(pos.coachingInsight || offenseObs || defenseObs)
-
-                return (
-                  <div key={pos.possessionId} className="rounded-xl border border-white/[0.07] bg-white/[0.02] overflow-hidden hover:border-white/[0.12] transition-colors">
-
-                    {/* Possession header (collapsed row) */}
-                    <button
-                      onClick={() => handlePossessionClick(pos)}
-                      className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-white/[0.03] transition-colors group"
-                    >
-                      <span className="shrink-0 w-5 h-5 rounded-full bg-white/[0.06] text-[9px] font-bold text-gray-500 flex items-center justify-center">
-                        {pos.possessionId + 1}
-                      </span>
-
-                      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                        <span className={`text-[9px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full border ${possessionBadgeClass(pos.possessionType)}`}>
-                          {posLabel}
-                        </span>
-                        {pos.importanceScore !== undefined && (
-                          <span className={`text-[8px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-full border ${
-                            pos.importanceScore >= 8 ? 'text-orange-400 bg-orange-500/10 border-orange-500/20' :
-                            pos.importanceScore >= 5 ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
-                            'text-gray-500 bg-white/[0.04] border-white/[0.08]'
-                          }`}>
-                            {pos.importanceScore >= 8 ? 'HIGH' : pos.importanceScore >= 5 ? 'MED' : 'LOW'}
-                          </span>
-                        )}
-                        <span className="text-[10px] font-mono text-gray-600">
-                          {formatTimestamp(pos.startTimestamp)} → {formatTimestamp(pos.endTimestamp)}
-                        </span>
+                {/* Offense / defense observation strip */}
+                {(offenseObs || defenseObs) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {offenseObs && (
+                      <div className="rounded-lg bg-amber-500/[0.05] border border-amber-500/15 px-4 py-3">
+                        <p className="text-[9px] font-bold tracking-[0.18em] uppercase text-amber-400 mb-1">Offense</p>
+                        <p className="text-[13px] text-gray-300 leading-relaxed">{offenseObs}</p>
                       </div>
-
-                      <ChevronDown
-                        size={13}
-                        className={`shrink-0 text-gray-700 group-hover:text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                      />
-                    </button>
-
-                    {/* ── Expanded breakdown ──────────────────────────── */}
-                    {isExpanded && (
-                      <div className="border-t border-white/[0.06]">
-
-                        {hasBreakdown && (
-                          <div className="px-4 py-4 space-y-3.5">
-
-                            {/* 1. Outcome badge + timestamp */}
-                            <div className="flex items-center gap-2.5">
-                              {outcomeBadge && (
-                                <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${outcomeBadge.cls}`}>
-                                  <span className="text-[8px] leading-none">●</span>
-                                  {outcomeBadge.label}
-                                </span>
-                              )}
-                              <span className="text-[10px] font-mono text-gray-600">
-                                {formatTimestamp(pos.startTimestamp)} → {formatTimestamp(pos.endTimestamp)}
-                              </span>
-                            </div>
-
-                            {/* 2. Coaching takeaway — headline */}
-                            {pos.coachingInsight && (
-                              <p className="text-sm font-semibold text-white leading-relaxed">
-                                {pos.coachingInsight}
-                              </p>
-                            )}
-
-                            {/* 3. Offense / Defense detail */}
-                            {(offenseObs || defenseObs) && (
-                              <div className="space-y-3 pt-3 border-t border-white/[0.06]">
-                                {offenseObs && (
-                                  <div className="space-y-1">
-                                    <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-violet-400">
-                                      Offense
-                                    </span>
-                                    <p className="text-xs text-gray-400 leading-relaxed">{offenseObs}</p>
-                                  </div>
-                                )}
-                                {defenseObs && (
-                                  <div className="space-y-1">
-                                    <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-red-400">
-                                      Defense
-                                    </span>
-                                    <p className="text-xs text-gray-400 leading-relaxed">
-                                      {defenseObs.replace(/=/g, ': ').replace(/, /g, ' · ')}
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                          </div>
-                        )}
-
-                        {/* Sequence rows */}
-                        {pos.sequences.length > 0 && (
-                          <div className={`divide-y divide-white/[0.05] ${hasBreakdown ? 'border-t border-white/[0.06]' : ''}`}>
-                            {pos.sequences.map((seq) => {
-                              const isActive = activeSeq === seq.sequenceIndex
-                              return (
-                                <button
-                                  key={seq.sequenceIndex}
-                                  onClick={() => handleSequenceClick(seq)}
-                                  className={`w-full text-left flex items-center gap-3 px-4 py-2.5 transition-all group ${
-                                    isActive ? 'bg-orange-500/[0.06]' : 'hover:bg-white/[0.03]'
-                                  }`}
-                                >
-                                  <div className="shrink-0 w-10 h-7 rounded-md overflow-hidden bg-white/[0.05] border border-white/[0.08]">
-                                    {seq.thumbnail ? (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={`data:image/jpeg;base64,${seq.thumbnail}`} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <div className="w-full h-full flex items-center justify-center">
-                                        <Play size={8} className="text-gray-600" />
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                                    <span className={`text-[8px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-full border shrink-0 ${playTypeBadgeClass(seq.playType)}`}>
-                                      {seq.playType}
-                                    </span>
-                                    <span className="text-[9px] font-mono text-gray-600 shrink-0">
-                                      {formatTimestamp(seq.timestampStart)}
-                                    </span>
-                                  </div>
-
-                                  <ChevronRight
-                                    size={11}
-                                    className={`shrink-0 transition-colors ${isActive ? 'text-orange-400' : 'text-gray-700 group-hover:text-gray-400'}`}
-                                  />
-                                </button>
-                              )
-                            })}
-                          </div>
-                        )}
+                    )}
+                    {defenseObs && (
+                      <div className="rounded-lg bg-sky-500/[0.05] border border-sky-500/15 px-4 py-3">
+                        <p className="text-[9px] font-bold tracking-[0.18em] uppercase text-sky-400 mb-1">Defense</p>
+                        <p className="text-[13px] text-gray-300 leading-relaxed">
+                          {defenseObs.replace(/=/g, ': ').replace(/, /g, ' · ')}
+                        </p>
                       </div>
                     )}
                   </div>
-                )
-              })}
-            </div>
-
-            {/* Full report toggle */}
-            {reportText && (
-              <div className="pt-2">
-                <button
-                  onClick={() => setShowReport(v => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-white/[0.08] hover:border-white/[0.15] text-gray-500 hover:text-gray-300 transition-all text-xs font-medium bg-white/[0.02]"
-                >
-                  <span>Full Scouting Report</span>
-                  <ChevronRight size={13} className={`transition-transform ${showReport ? 'rotate-90' : ''}`} />
-                </button>
-                {showReport && (
-                  <div className="mt-3">
-                    <AnalysisSummary analysis={{ summary: reportText, model: model ?? '', frameCount: frameCount ?? 0 }} />
-                  </div>
                 )}
               </div>
-            )}
-          </>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
-        ) : hasSequences ? (
-          <>
-            {/* Flat sequence list (legacy / fallback) */}
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-orange-600 tracking-[0.22em] uppercase">
-                Key Sequences
-              </p>
-              <span className="text-[10px] font-semibold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded-full">
-                {sequences.length} moments
-              </span>
-            </div>
+      {/* ── Right — possession rail ───────────────────────────────── */}
+      <div className="lg:sticky lg:top-6 min-w-0">
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-display text-xl font-bold uppercase tracking-wide text-white">
+            Possessions
+          </p>
+          <span className="text-[10px] text-gray-600 font-mono">{filtered.length}/{possessions.length}</span>
+        </div>
 
-            <div className="space-y-2">
-              {sequences.map((seq) => {
-                const isActive = activeSeq === seq.sequenceIndex
-                const preview = seq.whatHappened || seq.summary
-                return (
-                  <button
-                    key={seq.sequenceIndex}
-                    onClick={() => handleSequenceClick(seq)}
-                    className={`w-full text-left flex items-start gap-4 px-4 py-4 rounded-xl border transition-all duration-200 group ${
-                      isActive
-                        ? 'border-orange-500/30 bg-orange-500/[0.06]'
-                        : 'border-white/[0.07] bg-white/[0.02] hover:border-orange-500/20 hover:bg-orange-500/[0.04]'
-                    }`}
-                  >
-                    <div className="shrink-0 w-16 h-12 rounded-lg overflow-hidden bg-white/[0.05] border border-white/[0.08]">
-                      {seq.thumbnail ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={`data:image/jpeg;base64,${seq.thumbnail}`} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Play size={14} className="text-gray-600" />
-                        </div>
+        {/* Outcome filter chips */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {FILTERS.map(f => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition-all ${
+                filter === f.id
+                  ? 'border-orange-500/50 bg-orange-500/15 text-orange-300'
+                  : 'border-white/[0.08] text-gray-500 hover:text-gray-300 hover:border-white/20'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="scroll-rail space-y-1.5 lg:max-h-[calc(100vh-12rem)] overflow-y-auto pr-1">
+          {filtered.map((pos, i) => {
+            const isSelected = pos.possessionId === selectedId
+            const meta = OUTCOME_META[pos.outcome] ?? null
+            return (
+              <motion.button
+                key={pos.possessionId}
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.25, delay: Math.min(i * 0.02, 0.4) }}
+                onClick={() => selectPossession(pos)}
+                className={`relative w-full text-left rounded-xl border px-3.5 py-3 transition-all duration-150 group ${
+                  isSelected
+                    ? 'border-orange-500/40 bg-orange-500/[0.07]'
+                    : 'border-white/[0.06] bg-white/[0.015] hover:border-white/[0.15] hover:bg-white/[0.04]'
+                }`}
+              >
+                {/* Selected edge bar */}
+                {isSelected && (
+                  <motion.span
+                    layoutId="possession-edge"
+                    className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-orange-500"
+                    style={{ boxShadow: '0 0 10px rgba(249,115,22,0.6)' }}
+                  />
+                )}
+
+                <div className="flex items-center gap-2.5">
+                  <span className={`font-display text-lg font-bold leading-none w-7 shrink-0 ${isSelected ? 'text-orange-400' : 'text-white/25 group-hover:text-white/50'} transition-colors`}>
+                    {pos.possessionId + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[9px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full border ${badgeClass(pos.possessionType)}`}>
+                        {POSSESSION_TYPE_LABELS[pos.possessionType] ?? pos.possessionType}
+                      </span>
+                      {(pos.importanceScore ?? 0) >= 8 && (
+                        <span className="text-[8px] font-bold tracking-wider uppercase text-orange-400">★ Key</span>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0 space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-[9px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full border ${playTypeBadgeClass(seq.playType)}`}>
-                          {seq.playType}
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="font-mono text-[10px] text-gray-600">
+                        {formatTimestamp(pos.startTimestamp)}
+                      </span>
+                      {meta && (
+                        <span className={`flex items-center gap-1 text-[9px] font-bold uppercase ${meta.text}`}>
+                          <span className={`w-1 h-1 rounded-full ${meta.dot}`} />
+                          {meta.label}
                         </span>
-                        <span className="flex items-center gap-1 text-[10px] font-mono text-gray-600">
-                          <Clock size={9} />
-                          {formatTimestamp(seq.timestampStart)}
-                        </span>
-                      </div>
-                      <p className={`text-xs leading-relaxed line-clamp-2 ${isActive ? 'text-gray-200' : 'text-gray-500 group-hover:text-gray-400'}`}>
-                        {preview}
-                      </p>
+                      )}
                     </div>
-                    <ChevronRight size={14} className={`shrink-0 mt-1 transition-colors ${isActive ? 'text-orange-400' : 'text-gray-700 group-hover:text-gray-400'}`} />
-                  </button>
-                )
-              })}
-            </div>
-
-            {reportText && (
-              <div className="pt-2">
-                <button
-                  onClick={() => setShowReport(v => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-white/[0.08] hover:border-white/[0.15] text-gray-500 hover:text-gray-300 transition-all text-xs font-medium bg-white/[0.02]"
-                >
-                  <span>Full Scouting Report</span>
-                  <ChevronRight size={13} className={`transition-transform ${showReport ? 'rotate-90' : ''}`} />
-                </button>
-                {showReport && (
-                  <div className="mt-3">
-                    <AnalysisSummary analysis={{ summary: reportText, model: model ?? '', frameCount: frameCount ?? 0 }} />
                   </div>
-                )}
-              </div>
-            )}
-          </>
+                  <Play size={11} className={`shrink-0 transition-colors ${isSelected ? 'text-orange-400' : 'text-gray-700 group-hover:text-gray-400'}`} />
+                </div>
+              </motion.button>
+            )
+          })}
 
-        ) : (
-          /* No sequences at all */
-          <>
-            <p className="text-[11px] font-semibold text-orange-600 tracking-[0.22em] uppercase">
-              Scouting Report
+          {filtered.length === 0 && (
+            <p className="text-xs text-gray-600 text-center py-8">
+              No possessions with this outcome.
             </p>
-            {reportText && (
-              <AnalysisSummary analysis={{ summary: reportText, model: model ?? '', frameCount: frameCount ?? 0 }} />
-            )}
-          </>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

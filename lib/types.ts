@@ -101,6 +101,26 @@ export interface GameIdentity {
   primaryWeaknesses: string[]
 }
 
+/** One actionable item in the "how to beat this team" plan. */
+export interface GamePlanKey {
+  title: string
+  detail: string
+  /** start_ts values of possessions that justify this key (may be empty) */
+  supportingTimestamps: number[]
+}
+
+/** AI-generated plan for a coach preparing to play AGAINST the analyzed team. */
+export interface GamePlan {
+  /** How to attack them when you have the ball */
+  offensiveKeys: GamePlanKey[]
+  /** How to take away what they do best */
+  defensiveKeys: GamePlanKey[]
+  /** Pace/tempo guidance: should you run with them or slow them down, and why */
+  tempoAdvice: string
+  /** Personnel or matchup notes worth game-planning around */
+  matchupNotes: string[]
+}
+
 export interface FocusTeam {
   /** Jersey color as the coach would describe it, e.g. "white", "navy blue" */
   jerseyColor: string
@@ -148,6 +168,7 @@ export interface AnalysisResult {
   defensiveTendencies: TendencyItem[]
   transitionAnalysis: string
   gameIdentity: GameIdentity | null
+  gamePlan: GamePlan | null
   playerReport?: PlayerReport | null
   strategicAdjustments: StrategicAdjustment[]
   rankedObservations: RankedObservation[]
