@@ -28,6 +28,22 @@ about the format when saving, keep it as **CSV**.)
 - `defensive-stop` — defense clearly ends the possession without a shot (e.g. shot-clock violation)
 - `foul` — possession ends in a whistle/free throws (counted for detection, skipped when grading outcomes, since the analyzer can't say "foul" yet)
 
+### Possession type cheat sheet (all optional — blank is always safe)
+- `half_court` — the default; offense sets up against a set defense (~60-70% of possessions)
+- `transition` — fast break; scored/attempted before the defense got set (~first 7s)
+- `early_offense` — flowed straight into an action quickly, but not a true fast break
+- `late_clock` — forced/hurried shot as the clock ran out
+- `pick_and_roll` — the possession was *defined* by a ball screen action
+- `isolation` — one-on-one with everyone else cleared out
+- `post_up` — possession ran through a big with his back to the basket
+- `baseline_out_of_bounds` / `sideline_out_of_bounds` — set inbounds play
+- `scramble` — chaos: loose balls, broken plays, putback madness
+- `special_situation` — end-of-quarter heaves and other weird one-offs
+
+A possession that merely *contains* a ball screen but ends with something else
+is still `half_court` — only use the specific types when that action was the
+whole story.
+
 ### Labeling tips
 - A **possession ends when the other team gains control** — not on every pass or dribble.
 - Use the video player's timestamp display; pausing at each change of possession is the fastest workflow.
