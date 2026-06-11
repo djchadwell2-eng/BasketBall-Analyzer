@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-06-11T21:56:00.726Z",
+  "labelsFile": "eval/labels/example-game.csv",
+  "analysisFile": "eval/results/smoke-test.analysis.json",
+  "detection": {
+    "truthCount": 6,
+    "predictedCount": 6,
+    "matched": 5,
+    "precision": 0.8333333333333334,
+    "recall": 0.8333333333333334,
+    "f1": 0.8333333333333334
+  },
+  "boundaries": {
+    "meanStartErrorSec": 1.2,
+    "meanEndErrorSec": 1.2,
+    "pctStartsWithin3s": 1
+  },
+  "outcomes": {
+    "comparable": 5,
+    "correct": 3,
+    "accuracy": 0.6,
+    "predictedUnknown": 1,
+    "confusion": {
+      "missed": {
+        "made": 1
+      },
+      "made": {
+        "made": 2
+      },
+      "defensive-stop": {
+        "unknown": 1
+      },
+      "turnover": {
+        "turnover": 1
+      }
+    }
+  },
+  "possessionTypes": {
+    "comparable": 5,
+    "correct": 4,
+    "accuracy": 0.8
+  },
+  "misses": [
+    {
+      "possession": 6,
+      "start": 79,
+      "end": 91,
+      "outcome": "foul"
+    }
+  ],
+  "hallucinations": [
+    {
+      "possessionId": 6,
+      "start": 100,
+      "end": 110,
+      "outcome": "missed"
+    }
+  ],
+  "outcomeMistakes": [
+    {
+      "possession": 3,
+      "start": 29,
+      "truthOutcome": "missed",
+      "predictedOutcome": "made"
+    },
+    {
+      "possession": 5,
+      "start": 64,
+      "truthOutcome": "defensive-stop",
+      "predictedOutcome": "unknown"
+    }
+  ]
+}

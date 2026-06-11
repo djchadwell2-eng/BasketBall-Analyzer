@@ -1,0 +1,10 @@
+{
+  "possessions": [
+    { "possessionId": 1, "startTimestamp": 6, "endTimestamp": 20, "outcome": "made", "possessionType": "half_court" },
+    { "possessionId": 2, "startTimestamp": 22, "endTimestamp": 28, "outcome": "turnover", "possessionType": "transition" },
+    { "possessionId": 3, "startTimestamp": 30, "endTimestamp": 50, "outcome": "made", "possessionType": "half_court" },
+    { "possessionId": 4, "startTimestamp": 53, "endTimestamp": 65, "outcome": "made", "possessionType": "half_court" },
+    { "possessionId": 5, "startTimestamp": 66, "endTimestamp": 78, "outcome": "unknown", "possessionType": "half_court" },
+    { "possessionId": 6, "startTimestamp": 100, "endTimestamp": 110, "outcome": "missed", "possessionType": "isolation" }
+  ]
+}

@@ -12,6 +12,10 @@ yarn-error.log*
 
 .env*.local
 
+# eval harness outputs — cached Gemini analyses are large (base64 thumbnails)
+/eval/results/*.analysis.json
+!/eval/results/smoke-test.analysis.json
+
 .vercel
 *.tsbuildinfo
 next-env.d.ts
