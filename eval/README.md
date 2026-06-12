@@ -66,6 +66,15 @@ the analyzer, re-run with `--fresh` to get a new analysis to grade:
 npm run eval -- --labels eval/labels/game1.csv --video "C:\path\to\game1.mp4" --fresh
 ```
 
+**Labeled against a longer source video?** If you watched the full game on
+Hudl but downloaded only a clip, your label times won't match the clip's
+clock. Find the moment of your first label in the clip (e.g. your "9:14" play
+appears at 0:06 in the clip → offset is 9:08) and pass it:
+
+```bash
+npm run eval -- --labels eval/labels/game1.csv --video eval/videos/game1.mp4 --offset 9:08
+```
+
 You can also grade any saved analysis JSON directly:
 
 ```bash

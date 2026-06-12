@@ -9,7 +9,7 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
-import { parseLabelsCsv, scoreAnalysis, toPredicted, formatReport } from './scorer'
+import { parseLabelsCsv, parseTimestamp, scoreAnalysis, toPredicted, formatReport } from './scorer'
 import type { PossessionResult } from '../lib/types'
 
 const RESULTS_DIR = path.join(__dirname, 'results')
@@ -38,6 +38,7 @@ async function main(): Promise<void> {
   const labelsPath = getArg('labels')
   const videoPath = getArg('video')
   const analysisPath = getArg('analysis')
+  const offsetArg = getArg('offset')
   const fresh = process.argv.includes('--fresh')
 
   if (!labelsPath || (!videoPath && !analysisPath)) {
@@ -45,12 +46,26 @@ async function main(): Promise<void> {
     console.log('  npm run eval -- --labels <labels.csv> --video <game.mp4>      analyze (cached) then score')
     console.log('  npm run eval -- --labels <labels.csv> --analysis <result.json> score a saved analysis')
     console.log('  add --fresh to force a new Gemini analysis even if a cache exists')
+    console.log('  add --offset <m:ss> if labels were timed against a longer source video:')
+    console.log('    the offset (where your clip starts in that source) is subtracted from every label')
     process.exit(1)
   }
 
   if (!fs.existsSync(labelsPath)) throw new Error(`Labels file not found: ${labelsPath}`)
-  const truth = parseLabelsCsv(fs.readFileSync(labelsPath, 'utf8'))
+  let truth = parseLabelsCsv(fs.readFileSync(labelsPath, 'utf8'))
   console.log(`[eval] loaded ${truth.length} ground-truth possessions from ${labelsPath}`)
+
+  // Shift labels timed against a longer source video into clip-relative time
+  if (offsetArg) {
+    const offset = parseTimestamp(offsetArg)
+    const before = truth.length
+    truth = truth
+      .map(t => ({ ...t, start: t.start - offset, end: t.end - offset }))
+      .filter(t => t.end > 0)
+    truth.forEach(t => { if (t.start < 0) t.start = 0 })
+    console.log(`[eval] applied offset -${offsetArg}: labels now span ${truth[0]?.start.toFixed(0)}s-${truth[truth.length - 1]?.end.toFixed(0)}s` +
+      (before !== truth.length ? ` (${before - truth.length} row(s) fell before the clip start and were dropped)` : ''))
+  }
 
   // --- Get an analysis: from --analysis, from cache, or by running Gemini ---
   let possessions: PossessionResult[]

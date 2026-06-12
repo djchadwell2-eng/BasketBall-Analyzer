@@ -47,10 +47,13 @@ const WIDE_MEDIA_RESOLUTION   = 'MEDIA_RESOLUTION_LOW'
 // mid-stream and silently dropping every possession in a 5-minute window.
 const WIDE_MAX_OUTPUT_TOKENS  = 16000
 
-export const BURST_FPS    = 4    // frames per second for deep-analysis burst; tune empirically
-export const BURST_BEFORE = 1.0  // seconds before peak motion to start burst
-export const BURST_AFTER  = 2.0  // seconds after peak motion to end burst
-const BURST_FRAME_CAP     = 15   // hard max frames per burst
+// Deep pass sends the actual possession clip (video + audio) so the model can
+// see how the possession ENDS and hear rim/whistle/buzzer evidence. The old
+// JPEG-burst approach showed ~3s around peak motion and almost never saw the
+// shot — outcomes came back "unknown" on most possessions.
+export const DEEP_CLIP_PAD_BEFORE = 2   // seconds before the possession start
+export const DEEP_CLIP_PAD_AFTER  = 3   // seconds after the end (shot landing, scoreboard update)
+const DEEP_CLIP_MAX_SECONDS       = 45  // cost ceiling per possession clip
 const DEEP_MAX_OUTPUT_TOKENS     = 8000
 const SYNTHESIS_MAX_OUTPUT_TOKENS = 8000  // includes the game_plan section
 
@@ -301,19 +304,6 @@ async function scoreMotionPerSecond(inputPath: string): Promise<MotionScore[]> {
   return scores
 }
 
-function findPeakMotion(scores: MotionScore[], startTs: number, endTs: number): number {
-  const midpoint = (startTs + endTs) / 2
-  let best = midpoint
-  let bestScore = -1
-  for (const s of scores) {
-    if (s.timestamp >= startTs && s.timestamp <= endTs && s.score > bestScore) {
-      bestScore = s.score
-      best = s.timestamp
-    }
-  }
-  return best
-}
-
 // =============================================================================
 // Team perspective — tells every prompt WHICH team the report is about.
 // Without this, Gemini picks a team arbitrarily and "offense"/"defense" in the
@@ -494,22 +484,27 @@ async function processWidePass(
 }
 
 // =============================================================================
-// COMPONENT C — Deep Pass (per-possession JPEG burst, inline inlineData, no File API)
+// COMPONENT C — Deep Pass (per-possession video clip with audio, File API)
 // =============================================================================
 
-function buildDeepBurstPrompt(possessionId: number, startTs: number, endTs: number, frameCount: number, focusTeam: FocusTeam | null): string {
+function buildDeepClipPrompt(possessionId: number, startTs: number, endTs: number, focusTeam: FocusTeam | null): string {
   const teamBlock = focusTeam
     ? `\nPERSPECTIVE: This report is for the coach of ${focusTeamLabel(focusTeam)} — the FOCUS TEAM.
 - If the focus team has the ball: describe THEIR offense.
 - If the opponent has the ball: emphasize how the focus team DEFENDS (the defense fields describe the focus team).
 - Write what_it_means and coaching_point as advice to the focus team's coach.\n`
     : ''
-  return `Basketball film analyst. ${frameCount} ordered frames, possession ${possessionId}, game time ${startTs.toFixed(1)}s–${endTs.toFixed(1)}s.
+  return `Basketball film analyst. You are watching ONE possession as a video clip WITH AUDIO. In the full game this is possession ${possessionId}, game time ${startTs.toFixed(1)}s–${endTs.toFixed(1)}s.
 ${teamBlock}
+EVIDENCE — use ALL of it before deciding the outcome:
+- VIDEO: watch to the very end of the clip. The outcome usually happens in the final seconds.
+- AUDIO: a clean net "swish" or rim clank, the referee's whistle, the buzzer, and crowd reaction are strong outcome evidence.
+- SCOREBOARD: if a scoreboard is visible, read the score early and late in the clip. A score change is DEFINITIVE proof of a made basket (+2 or +3 tells you the shot value).
+
 RULES (all mandatory):
-1. Only describe what is physically visible. Never invent.
+1. Only describe what is physically visible or audible. Never invent.
 2. Use "appears to"/"seems to" for anything inferred.
-3. OUTCOME: "made"=ball visibly through rim or scoreboard change; "missed"=ball off rim/backboard; "turnover"=steal/OOB/violation; "defensive-stop"=defense clearly prevents score; "unknown"=default for any doubt or cut-away.
+3. OUTCOME: "made"=ball through rim, scoreboard increase, or clear make evidence (net sound + crowd); "missed"=ball off rim/backboard with no score change; "turnover"=steal/OOB/violation; "defensive-stop"=defense clearly ends the possession without a shot; "unknown"=ONLY if the clip truly cuts away before the possession resolves.
 4. Assign action_types ONLY if movement pattern is clearly visible.
 5. SHOTS: only assign catch_shoot/pull_up if you SEE a shooting motion or ball released toward the rim. If the ball is passed to a teammate, do NOT add catch_shoot/pull_up and do NOT assign a made/missed outcome. When unsure between pass and shot, treat it as a PASS.
 6. Unknown or uncertain fields → "unknown" or null.
@@ -529,44 +524,32 @@ outcome: made|missed|turnover|defensive_stop|unknown  direction: left|right|cent
 confidence: 0.8-1.0=clearly visible; 0.5-0.79=inferred (use hedged prose); <0.5={"possession_id":${possessionId},"confidence":0.0,"outcome":"unknown"} only`
 }
 
-async function extractBurstFrames(
+/** Cuts one possession (plus padding) into a small 480p clip, keeping audio. */
+async function extractPossessionClip(
   videoPath: string,
   startS: number,
-  endS: number,
-  fps: number,
-  cap: number
-): Promise<string[]> {
-  const duration = Math.max(0.1, endS - startS)
-  const sessionId = `burst_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-  const outPattern = path.join(os.tmpdir(), `${sessionId}_%03d.jpg`)
-  const frames: string[] = []
-
-  try {
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-ss', startS.toFixed(3),
-      '-t', duration.toFixed(3),
-      '-i', videoPath,
-      '-vf', `fps=${fps}`,
-      '-frames:v', String(cap),
-      '-q:v', '2',
-      outPattern,
-    ], { maxBuffer: 10 * 1024 * 1024 })
-  } catch {
-    // ffmpeg may exit non-zero even when frames were written; fall through to read what exists
-  }
-
-  for (let i = 1; i <= cap; i++) {
-    const p = path.join(os.tmpdir(), `${sessionId}_${String(i).padStart(3, '0')}.jpg`)
-    try {
-      frames.push((await fs.promises.readFile(p)).toString('base64'))
-    } catch {
-      break // frame doesn't exist — ffmpeg produced fewer than cap
-    }
-    fs.promises.unlink(p).catch(() => {})
-  }
-
-  return frames
+  endS: number
+): Promise<string> {
+  const duration = Math.min(Math.max(2, endS - startS), DEEP_CLIP_MAX_SECONDS)
+  const clipPath = path.join(
+    os.tmpdir(),
+    `deep_clip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp4`
+  )
+  await execFileAsync('ffmpeg', [
+    '-y',
+    '-ss', startS.toFixed(3),
+    '-t', duration.toFixed(3),
+    '-i', videoPath,
+    '-vf', 'scale=-2:480',
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '28',
+    '-c:a', 'aac',
+    '-b:a', '64k',
+    '-movflags', '+faststart',
+    clipPath,
+  ], { maxBuffer: 10 * 1024 * 1024 })
+  return clipPath
 }
 
 function buildKeyObservations(raw: RawDeepPossession): string[] {
@@ -585,52 +568,57 @@ function buildKeyObservations(raw: RawDeepPossession): string[] {
 
 async function analyzeOnePossession(
   possession: PossessionSummary,
-  motionScores: MotionScore[],
   videoPath: string,
   videoDuration: number,
   possessionIndex: number,
   totalPossessions: number,
   model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  fileManager: GoogleAIFileManager,
   focusTeam: FocusTeam | null
 ): Promise<{ possession: PossessionResult; sequence: SequenceResult } | null> {
-  const peakTs     = findPeakMotion(motionScores, possession.startTs, possession.endTs)
-  const burstStart = Math.max(0, peakTs - BURST_BEFORE)
-  const burstEnd   = Math.min(videoDuration, peakTs + BURST_AFTER)
+  const clipStart = Math.max(0, possession.startTs - DEEP_CLIP_PAD_BEFORE)
+  const clipEnd   = Math.min(videoDuration, possession.endTs + DEEP_CLIP_PAD_AFTER)
 
-  const frames = await extractBurstFrames(videoPath, burstStart, burstEnd, BURST_FPS, BURST_FRAME_CAP)
-  // DIAG 1: burst extraction result
-  console.log(
-    `[diag] possession ${possessionIndex + 1}/${totalPossessions}:` +
-    ` peak_ts=${peakTs.toFixed(2)}s (window ${burstStart.toFixed(2)}s–${burstEnd.toFixed(2)}s),` +
-    ` burst_frames=${frames.length}`
-  )
-  if (frames.length === 0) {
-    console.warn(`[deep-pass] possession ${possessionIndex + 1}/${totalPossessions}: DROP — zero burst frames extracted`)
-    return null
-  }
+  let clipPath: string | null = null
+  let uploadedName: string | undefined
+  let rawText: string
+  try {
+    clipPath = await extractPossessionClip(videoPath, clipStart, clipEnd)
+    console.log(
+      `[diag] possession ${possessionIndex + 1}/${totalPossessions}:` +
+      ` clip ${clipStart.toFixed(1)}s–${clipEnd.toFixed(1)}s (${(clipEnd - clipStart).toFixed(1)}s, with audio)`
+    )
 
-  const prompt = buildDeepBurstPrompt(possession.possessionId, possession.startTs, possession.endTs, frames.length, focusTeam)
-  const imageParts = frames.map(b64 => ({ inlineData: { mimeType: 'image/jpeg', data: b64 } }))
+    const { uri, name } = await uploadAndPoll(clipPath, `deep_${possession.possessionId}`, fileManager)
+    uploadedName = name
 
-  const rawText = await withRetry(`possession ${possessionIndex} deep`, async () => {
-    const res = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }, ...imageParts] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: DEEP_MAX_OUTPUT_TOKENS,
-        mediaResolution: MEDIA_RESOLUTION,
-      } as ExtendedGenerationConfig,
+    const prompt = buildDeepClipPrompt(possession.possessionId, possession.startTs, possession.endTs, focusTeam)
+
+    rawText = await withRetry(`possession ${possessionIndex} deep`, async () => {
+      const res = await model.generateContent({
+        contents: [{ role: 'user', parts: [
+          { fileData: { mimeType: 'video/mp4', fileUri: uri } },
+          { text: prompt },
+        ]}],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          maxOutputTokens: DEEP_MAX_OUTPUT_TOKENS,
+          mediaResolution: MEDIA_RESOLUTION,
+        } as ExtendedGenerationConfig,
+      })
+      const u = res.response.usageMetadata
+      if (u) {
+        const thoughts = (u as unknown as Record<string, unknown>).thoughtsTokenCount
+        console.log(`[tokens] possession ${possessionIndex + 1} deep: prompt=${u.promptTokenCount}, output=${u.candidatesTokenCount}, thoughts=${thoughts ?? 'n/a'}, total=${u.totalTokenCount}`)
+      }
+      const finishReason = res.response.candidates?.[0]?.finishReason
+      console.log(`[diag] possession ${possessionIndex + 1} finishReason=${finishReason}, maxOutputTokens_sent=${DEEP_MAX_OUTPUT_TOKENS}`)
+      return stripFences(res.response.text())
     })
-    const u = res.response.usageMetadata
-    if (u) {
-      const thoughts = (u as unknown as Record<string, unknown>).thoughtsTokenCount
-      console.log(`[tokens] possession ${possessionIndex + 1} deep: prompt=${u.promptTokenCount}, output=${u.candidatesTokenCount}, thoughts=${thoughts ?? 'n/a'}, total=${u.totalTokenCount}`)
-    }
-    // DIAG: finishReason and the literal maxOutputTokens sent on this request
-    const finishReason = res.response.candidates?.[0]?.finishReason
-    console.log(`[diag] possession ${possessionIndex + 1} finishReason=${finishReason}, maxOutputTokens_sent=${DEEP_MAX_OUTPUT_TOKENS}`)
-    return stripFences(res.response.text())
-  })
+  } finally {
+    if (clipPath) fs.promises.unlink(clipPath).catch(() => {})
+    if (uploadedName) { try { await fileManager.deleteFile(uploadedName) } catch {} }
+  }
   // DIAG 2: raw model response text before any parsing
   console.log(`[diag] possession ${possessionIndex + 1} raw response: ${rawText}`)
 
@@ -658,7 +646,7 @@ async function analyzeOnePossession(
   }
   console.log(
     `[deep-pass] possession ${possessionIndex + 1}/${totalPossessions}: KEPT —` +
-    ` peak_ts=${peakTs.toFixed(1)}s, frames=${frames.length},` +
+    ` clip ${clipStart.toFixed(1)}s–${clipEnd.toFixed(1)}s,` +
     ` outcome=${raw.outcome ?? 'unknown'}, conf=${conf.toFixed(2)}`
   )
 
@@ -717,10 +705,10 @@ async function analyzeOnePossession(
 
 async function processDeepPass(
   wideSummaries: PossessionSummary[],
-  motionScores: MotionScore[],
   videoPath: string,
   videoDuration: number,
   model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  fileManager: GoogleAIFileManager,
   focusTeam: FocusTeam | null
 ): Promise<{ possessions: PossessionResult[]; sequences: SequenceResult[] }> {
   const acquire = createSemaphore(DEEP_CONCURRENCY)
@@ -731,7 +719,7 @@ async function processDeepPass(
     const release = await acquire()
     try {
       results[i] = await analyzeOnePossession(
-        poss, motionScores, videoPath, videoDuration, i, wideSummaries.length, model, focusTeam
+        poss, videoPath, videoDuration, i, wideSummaries.length, model, fileManager, focusTeam
       )
     } catch (err) {
       console.error(`[deep-pass] possession ${i + 1} FAILED: ${err}`)
@@ -1092,7 +1080,7 @@ export async function analyzeVideoWithGemini(
 
   // Component C — deep pass (per-possession burst)
   const { possessions, sequences } = await processDeepPass(
-    wideSummaries, motionScores, videoPath, videoDuration, model, team
+    wideSummaries, videoPath, videoDuration, model, fileManager, team
   )
   console.log(
     `[deep-pass] kept ${possessions.length}/${wideSummaries.length} possessions` +
