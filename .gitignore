@@ -16,6 +16,9 @@ yarn-error.log*
 /eval/results/*.analysis.json
 !/eval/results/smoke-test.analysis.json
 
+# local game footage for evals — never commit video files
+/eval/videos/
+
 .vercel
 *.tsbuildinfo
 next-env.d.ts
