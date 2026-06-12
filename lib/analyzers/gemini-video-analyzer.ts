@@ -42,7 +42,10 @@ export const MEDIA_RESOLUTION = 'MEDIA_RESOLUTION_MEDIUM'
 type ExtendedGenerationConfig = GenerationConfig & { mediaResolution?: string }
 
 const WIDE_MEDIA_RESOLUTION   = 'MEDIA_RESOLUTION_LOW'
-const WIDE_MAX_OUTPUT_TOKENS  = 4000
+// maxOutputTokens includes the model's hidden thinking tokens. At 4000 the
+// thinking alone could eat the budget on busy chunks, truncating the JSON
+// mid-stream and silently dropping every possession in a 5-minute window.
+const WIDE_MAX_OUTPUT_TOKENS  = 16000
 
 export const BURST_FPS    = 4    // frames per second for deep-analysis burst; tune empirically
 export const BURST_BEFORE = 1.0  // seconds before peak motion to start burst
@@ -412,7 +415,11 @@ async function processWideChunk(
     const { uri, name } = await uploadAndPoll(chunk.path, `wide_${chunk.index}`, fileManager)
     uploadedName = name
 
-    const rawText = await withRetry(`chunk ${chunk.index} wide`, async () => {
+    // JSON.parse lives INSIDE the retry: a truncated or malformed response is
+    // retried like any other failure instead of silently dropping the chunk's
+    // possessions. If all retries fail, the error lands in chunkErrors where
+    // the user can see it.
+    const raw = await withRetry(`chunk ${chunk.index} wide`, async () => {
       const res = await model.generateContent({
         contents: [{ role: 'user', parts: [
           { fileData: { mimeType: 'video/mp4', fileUri: uri } },
@@ -425,14 +432,19 @@ async function processWideChunk(
         } as ExtendedGenerationConfig,
       })
       const u = res.response.usageMetadata
-      if (u) console.log(`[tokens] chunk ${chunk.index + 1} wide: prompt=${u.promptTokenCount}, output=${u.candidatesTokenCount}, total=${u.totalTokenCount}`)
-      return stripFences(res.response.text())
+      const finishReason = res.response.candidates?.[0]?.finishReason
+      if (u) {
+        const thoughts = (u as unknown as Record<string, unknown>).thoughtsTokenCount
+        console.log(`[tokens] chunk ${chunk.index + 1} wide: prompt=${u.promptTokenCount}, output=${u.candidatesTokenCount}, thoughts=${thoughts ?? 'n/a'}, total=${u.totalTokenCount}, finishReason=${finishReason}`)
+      }
+      const text = stripFences(res.response.text())
+      try {
+        return JSON.parse(text) as RawWideResponse
+      } catch {
+        console.warn(`[wide-pass] chunk ${chunk.index} JSON parse failed (finishReason=${finishReason}) -- tail: ...${text.slice(-160)}`)
+        throw new Error(`chunk ${chunk.index} wide pass returned unparseable JSON (finishReason=${finishReason})`)
+      }
     })
-
-    let raw: RawWideResponse = {}
-    try { raw = JSON.parse(rawText) as RawWideResponse } catch {
-      console.warn(`[wide-pass] chunk ${chunk.index} JSON parse failed -- treating as empty`)
-    }
 
     const rawPossessions = Array.isArray(raw.possessions) ? raw.possessions : []
     const summaries: PossessionSummary[] = rawPossessions

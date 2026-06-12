@@ -1,0 +1,250 @@
+{
+  "generatedAt": "2026-06-12T03:34:11.625Z",
+  "labelsFile": "eval/labels/game1.csv",
+  "analysisFile": "C:\\Users\\djcha\\New folder\\Basketball Analysis App\\eval\\results\\game1.analysis.json",
+  "detection": {
+    "truthCount": 33,
+    "predictedCount": 5,
+    "matched": 3,
+    "precision": 0.6,
+    "recall": 0.09090909090909091,
+    "f1": 0.15789473684210525
+  },
+  "boundaries": {
+    "meanStartErrorSec": 2,
+    "meanEndErrorSec": 8.333333333333334,
+    "pctStartsWithin3s": 0.6666666666666666
+  },
+  "outcomes": {
+    "comparable": 3,
+    "correct": 0,
+    "accuracy": 0,
+    "predictedUnknown": 3,
+    "confusion": {
+      "missed": {
+        "unknown": 3
+      }
+    }
+  },
+  "possessionTypes": {
+    "comparable": 3,
+    "correct": 1,
+    "accuracy": 0.3333333333333333
+  },
+  "misses": [
+    {
+      "possession": 1,
+      "start": 554,
+      "end": 572,
+      "outcome": "made"
+    },
+    {
+      "possession": 2,
+      "start": 574,
+      "end": 595,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 3,
+      "start": 595,
+      "end": 608,
+      "outcome": "missed"
+    },
+    {
+      "possession": 4,
+      "start": 619,
+      "end": 633,
+      "outcome": "missed"
+    },
+    {
+      "possession": 5,
+      "start": 634,
+      "end": 642,
+      "outcome": "made"
+    },
+    {
+      "possession": 6,
+      "start": 645,
+      "end": 652,
+      "outcome": "made"
+    },
+    {
+      "possession": 8,
+      "start": 664,
+      "end": 669,
+      "outcome": "made"
+    },
+    {
+      "possession": 10,
+      "start": 686,
+      "end": 694,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 12,
+      "start": 722,
+      "end": 741,
+      "outcome": "made"
+    },
+    {
+      "possession": 13,
+      "start": 743,
+      "end": 758,
+      "outcome": "missed"
+    },
+    {
+      "possession": 14,
+      "start": 764,
+      "end": 787,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 15,
+      "start": 795,
+      "end": 820,
+      "outcome": "made"
+    },
+    {
+      "possession": 16,
+      "start": 825,
+      "end": 840,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 17,
+      "start": 852,
+      "end": 864,
+      "outcome": "made"
+    },
+    {
+      "possession": 18,
+      "start": 865,
+      "end": 882,
+      "outcome": "made"
+    },
+    {
+      "possession": 19,
+      "start": 885,
+      "end": 894,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 20,
+      "start": 914,
+      "end": 932,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 21,
+      "start": 933,
+      "end": 945,
+      "outcome": "other"
+    },
+    {
+      "possession": 22,
+      "start": 946,
+      "end": 960,
+      "outcome": "other"
+    },
+    {
+      "possession": 23,
+      "start": 1020,
+      "end": 1032,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 24,
+      "start": 1034,
+      "end": 1038,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 25,
+      "start": 1047,
+      "end": 1074,
+      "outcome": "made"
+    },
+    {
+      "possession": 26,
+      "start": 1079,
+      "end": 1084,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 27,
+      "start": 1106,
+      "end": 1116,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 28,
+      "start": 1116,
+      "end": 1136,
+      "outcome": "foul"
+    },
+    {
+      "possession": 29,
+      "start": 1179,
+      "end": 1200,
+      "outcome": "made"
+    },
+    {
+      "possession": 30,
+      "start": 1201,
+      "end": 1216,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 31,
+      "start": 1217,
+      "end": 1220,
+      "outcome": "foul"
+    },
+    {
+      "possession": 32,
+      "start": 1235,
+      "end": 1250,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 33,
+      "start": 1251,
+      "end": 1256,
+      "outcome": "other"
+    }
+  ],
+  "hallucinations": [
+    {
+      "possessionId": 2,
+      "start": 699,
+      "end": 708,
+      "outcome": "unknown"
+    },
+    {
+      "possessionId": 4,
+      "start": 713,
+      "end": 716,
+      "outcome": "unknown"
+    }
+  ],
+  "outcomeMistakes": [
+    {
+      "possession": 7,
+      "start": 655,
+      "truthOutcome": "missed",
+      "predictedOutcome": "unknown"
+    },
+    {
+      "possession": 11,
+      "start": 704,
+      "truthOutcome": "missed",
+      "predictedOutcome": "unknown"
+    },
+    {
+      "possession": 9,
+      "start": 675,
+      "truthOutcome": "missed",
+      "predictedOutcome": "unknown"
+    }
+  ]
+}
