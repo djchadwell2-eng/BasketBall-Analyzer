@@ -5,7 +5,7 @@ import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { GoogleGenerativeAI, type GenerationConfig } from '@google/generative-ai'
 import { GoogleAIFileManager, FileState } from '@google/generative-ai/server'
-import { chunkVideo, type VideoChunk } from './chunker'
+import { chunkVideo, getVideoDurationSeconds, type VideoChunk } from './chunker'
 import { computeStats } from '../computeStats'
 import type {
   AnalysisResult,
@@ -59,7 +59,7 @@ const SYNTHESIS_MAX_OUTPUT_TOKENS = 8000  // includes the game_plan section
 
 const MAX_CONCURRENCY  = 4  // wide-pass (1 video request per chunk)
 const DEEP_CONCURRENCY = 4  // deep-pass — raise to 6 or 8 if 503s stay low
-const MAX_RETRIES = 5
+const MAX_RETRIES = 6
 
 // --- Motion scan constants ---
 const MOTION_WIDTH  = 32
@@ -215,11 +215,13 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = M
       return await fn()
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err))
-      const isRetriable = /429|5\d{2}|rate.?limit|quota|internal|unavailable/i.test(lastErr.message)
+      // Network-level failures (fetch failed, timeouts, resets) are just as
+      // transient as 429/5xx — a brief outage window must not drop possessions.
+      const isRetriable = /429|5\d{2}|rate.?limit|quota|internal|unavailable|fetch failed|network|econn|etimedout|socket/i.test(lastErr.message)
       if (!isRetriable || attempt === maxAttempts) throw lastErr
-      const baseMs  = 1000 * Math.pow(2, attempt - 1)        // 1s, 2s, 4s, 8s, 16s
+      const baseMs  = 1000 * Math.pow(2, attempt - 1)        // 1s, 2s, 4s, 8s, 16s, 32s
       const jitter  = Math.random() * baseMs * 0.25           // ±25%
-      const delayMs = Math.min(Math.round(baseMs + jitter), 16000)
+      const delayMs = Math.min(Math.round(baseMs + jitter), 30000)
       console.log(
         `[gemini-video-analyzer] ${label} attempt ${attempt}/${maxAttempts} failed,` +
         ` retrying in ${delayMs}ms: ${lastErr.message}`
@@ -578,6 +580,16 @@ async function analyzeOnePossession(
 ): Promise<{ possession: PossessionResult; sequence: SequenceResult } | null> {
   const clipStart = Math.max(0, possession.startTs - DEEP_CLIP_PAD_BEFORE)
   const clipEnd   = Math.min(videoDuration, possession.endTs + DEEP_CLIP_PAD_AFTER)
+
+  // Never cut a zero/negative window — possible if a wide-pass timestamp
+  // lands past the (estimated) end of the video.
+  if (clipEnd - clipStart < 1) {
+    console.warn(
+      `[deep-pass] possession ${possessionIndex + 1}/${totalPossessions}: SKIP —` +
+      ` window ${clipStart.toFixed(1)}s–${clipEnd.toFixed(1)}s is outside the video (duration=${videoDuration.toFixed(1)}s)`
+    )
+    return null
+  }
 
   let clipPath: string | null = null
   let uploadedName: string | undefined
@@ -1075,8 +1087,19 @@ export async function analyzeVideoWithGemini(
     }
   }
 
-  const videoDuration = videoDurationSeconds
-    ?? (motionScores.length > 0 ? motionScores[motionScores.length - 1].timestamp + 1 : 3600)
+  // True duration via ffprobe — the motion scan can come up short (it counts
+  // decoded 1fps frames), which previously produced clip windows BEYOND what
+  // it thought was the end of the video and broke late-game possessions.
+  let videoDuration: number
+  if (videoDurationSeconds) {
+    videoDuration = videoDurationSeconds
+  } else {
+    try {
+      videoDuration = await getVideoDurationSeconds(videoPath)
+    } catch {
+      videoDuration = motionScores.length > 0 ? motionScores[motionScores.length - 1].timestamp + 1 : 3600
+    }
+  }
 
   // Component C — deep pass (per-possession burst)
   const { possessions, sequences } = await processDeepPass(

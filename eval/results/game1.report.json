@@ -1,52 +1,87 @@
 {
-  "generatedAt": "2026-06-12T04:16:02.452Z",
+  "generatedAt": "2026-06-13T00:00:53.230Z",
   "labelsFile": "eval/labels/game1.csv",
   "analysisFile": "C:\\Users\\djcha\\New folder\\Basketball Analysis App\\eval\\results\\game1.analysis.json",
   "detection": {
     "truthCount": 33,
-    "predictedCount": 58,
-    "matched": 27,
-    "precision": 0.46551724137931033,
-    "recall": 0.8181818181818182,
-    "f1": 0.5934065934065933
+    "predictedCount": 33,
+    "matched": 18,
+    "precision": 0.5454545454545454,
+    "recall": 0.5454545454545454,
+    "f1": 0.5454545454545454
   },
   "boundaries": {
-    "meanStartErrorSec": 3.7222222222222223,
-    "meanEndErrorSec": 3.4444444444444446,
-    "pctStartsWithin3s": 0.6296296296296297
+    "meanStartErrorSec": 4.611111111111111,
+    "meanEndErrorSec": 5.111111111111111,
+    "pctStartsWithin3s": 0.5
   },
   "outcomes": {
-    "comparable": 24,
-    "correct": 3,
-    "accuracy": 0.125,
-    "predictedUnknown": 19,
+    "comparable": 16,
+    "correct": 4,
+    "accuracy": 0.25,
+    "predictedUnknown": 8,
     "confusion": {
       "made": {
-        "unknown": 7,
-        "made": 1,
-        "turnover": 1
+        "made": 4,
+        "unknown": 2
       },
       "turnover": {
-        "unknown": 8,
-        "turnover": 1
+        "unknown": 4,
+        "missed": 2
       },
       "missed": {
-        "unknown": 4,
-        "turnover": 1,
-        "missed": 1
+        "made": 1,
+        "unknown": 2,
+        "turnover": 1
       }
     }
   },
   "possessionTypes": {
-    "comparable": 25,
-    "correct": 17,
-    "accuracy": 0.68
+    "comparable": 17,
+    "correct": 15,
+    "accuracy": 0.8823529411764706
   },
   "misses": [
+    {
+      "possession": 7,
+      "start": 655,
+      "end": 663,
+      "outcome": "missed"
+    },
     {
       "possession": 8,
       "start": 664,
       "end": 669,
+      "outcome": "made"
+    },
+    {
+      "possession": 13,
+      "start": 743,
+      "end": 758,
+      "outcome": "missed"
+    },
+    {
+      "possession": 15,
+      "start": 795,
+      "end": 820,
+      "outcome": "made"
+    },
+    {
+      "possession": 16,
+      "start": 825,
+      "end": 840,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 17,
+      "start": 852,
+      "end": 864,
+      "outcome": "made"
+    },
+    {
+      "possession": 18,
+      "start": 865,
+      "end": 882,
       "outcome": "made"
     },
     {
@@ -56,21 +91,39 @@
       "outcome": "turnover"
     },
     {
+      "possession": 20,
+      "start": 914,
+      "end": 932,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 21,
+      "start": 933,
+      "end": 945,
+      "outcome": "other"
+    },
+    {
+      "possession": 23,
+      "start": 1020,
+      "end": 1032,
+      "outcome": "turnover"
+    },
+    {
+      "possession": 24,
+      "start": 1034,
+      "end": 1038,
+      "outcome": "turnover"
+    },
+    {
       "possession": 26,
       "start": 1079,
       "end": 1084,
       "outcome": "turnover"
     },
     {
-      "possession": 27,
-      "start": 1106,
-      "end": 1116,
-      "outcome": "turnover"
-    },
-    {
-      "possession": 28,
-      "start": 1116,
-      "end": 1136,
+      "possession": 31,
+      "start": 1217,
+      "end": 1220,
       "outcome": "foul"
     },
     {
@@ -83,207 +136,111 @@
   "hallucinations": [
     {
       "possessionId": 0,
-      "start": 12,
-      "end": 25,
+      "start": 15,
+      "end": 27,
       "outcome": "unknown"
     },
     {
       "possessionId": 1,
-      "start": 25,
-      "end": 31,
+      "start": 27,
+      "end": 39,
       "outcome": "unknown"
     },
     {
       "possessionId": 2,
-      "start": 31,
-      "end": 49,
+      "start": 121,
+      "end": 127,
       "outcome": "unknown"
     },
     {
       "possessionId": 3,
-      "start": 95,
-      "end": 104,
+      "start": 146,
+      "end": 152,
+      "outcome": "unknown"
+    },
+    {
+      "possessionId": 4,
+      "start": 207,
+      "end": 211,
       "outcome": "unknown"
     },
     {
       "possessionId": 5,
-      "start": 567,
-      "end": 573,
+      "start": 228,
+      "end": 233,
       "outcome": "made"
     },
     {
-      "possessionId": 7,
-      "start": 594,
+      "possessionId": 6,
+      "start": 555,
+      "end": 561,
+      "outcome": "unknown"
+    },
+    {
+      "possessionId": 9,
+      "start": 589,
       "end": 599,
+      "outcome": "missed"
+    },
+    {
+      "possessionId": 10,
+      "start": 599,
+      "end": 600,
       "outcome": "unknown"
     },
     {
-      "possessionId": 12,
-      "start": 655,
-      "end": 658,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 14,
-      "start": 670,
-      "end": 674,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 16,
-      "start": 681,
-      "end": 686,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 18,
-      "start": 689,
-      "end": 691,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 19,
-      "start": 692,
-      "end": 708,
+      "possessionId": 13,
+      "start": 628,
+      "end": 636,
       "outcome": "turnover"
     },
     {
-      "possessionId": 20,
-      "start": 708,
-      "end": 711,
+      "possessionId": 16,
+      "start": 651,
+      "end": 657,
+      "outcome": "made"
+    },
+    {
+      "possessionId": 17,
+      "start": 670,
+      "end": 678,
+      "outcome": "made"
+    },
+    {
+      "possessionId": 19,
+      "start": 685,
+      "end": 689,
       "outcome": "unknown"
     },
     {
       "possessionId": 22,
-      "start": 720,
-      "end": 724,
-      "outcome": "turnover"
-    },
-    {
-      "possessionId": 23,
-      "start": 724,
-      "end": 731,
+      "start": 709,
+      "end": 714,
       "outcome": "unknown"
     },
     {
-      "possessionId": 25,
-      "start": 742,
-      "end": 745,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 26,
-      "start": 746,
-      "end": 750,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 29,
-      "start": 774,
-      "end": 778,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 30,
-      "start": 778,
-      "end": 783,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 31,
-      "start": 783,
-      "end": 787,
-      "outcome": "turnover"
-    },
-    {
-      "possessionId": 33,
-      "start": 811,
-      "end": 814,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 34,
-      "start": 814,
-      "end": 821,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 36,
-      "start": 835,
-      "end": 839,
-      "outcome": "missed"
-    },
-    {
-      "possessionId": 37,
-      "start": 839,
-      "end": 847,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 39,
-      "start": 861,
-      "end": 865,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 40,
-      "start": 865,
-      "end": 867,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 41,
-      "start": 867,
-      "end": 871,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 42,
-      "start": 871,
-      "end": 874,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 44,
-      "start": 882,
-      "end": 885,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 51,
-      "start": 1073,
-      "end": 1079,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 53,
-      "start": 1200,
-      "end": 1201.5,
-      "outcome": "unknown"
-    },
-    {
-      "possessionId": 57,
-      "start": 1246,
-      "end": 1251.5,
+      "possessionId": 28,
+      "start": 1116,
+      "end": 1120,
       "outcome": "unknown"
     }
   ],
   "outcomeMistakes": [
     {
-      "possession": 25,
-      "start": 1047,
+      "possession": 29,
+      "start": 1179,
       "truthOutcome": "made",
+      "predictedOutcome": "unknown"
+    },
+    {
+      "possession": 14,
+      "start": 764,
+      "truthOutcome": "turnover",
       "predictedOutcome": "unknown"
     },
     {
       "possession": 2,
       "start": 574,
-      "truthOutcome": "turnover",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 20,
-      "start": 914,
       "truthOutcome": "turnover",
       "predictedOutcome": "unknown"
     },
@@ -294,26 +251,38 @@
       "predictedOutcome": "unknown"
     },
     {
-      "possession": 1,
-      "start": 554,
-      "truthOutcome": "made",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 23,
-      "start": 1020,
-      "truthOutcome": "turnover",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 15,
-      "start": 795,
-      "truthOutcome": "made",
-      "predictedOutcome": "unknown"
-    },
-    {
       "possession": 32,
       "start": 1235,
+      "truthOutcome": "turnover",
+      "predictedOutcome": "missed"
+    },
+    {
+      "possession": 3,
+      "start": 595,
+      "truthOutcome": "missed",
+      "predictedOutcome": "made"
+    },
+    {
+      "possession": 4,
+      "start": 619,
+      "truthOutcome": "missed",
+      "predictedOutcome": "unknown"
+    },
+    {
+      "possession": 27,
+      "start": 1106,
+      "truthOutcome": "turnover",
+      "predictedOutcome": "missed"
+    },
+    {
+      "possession": 5,
+      "start": 634,
+      "truthOutcome": "made",
+      "predictedOutcome": "unknown"
+    },
+    {
+      "possession": 10,
+      "start": 686,
       "truthOutcome": "turnover",
       "predictedOutcome": "unknown"
     },
@@ -324,76 +293,10 @@
       "predictedOutcome": "unknown"
     },
     {
-      "possession": 17,
-      "start": 852,
-      "truthOutcome": "made",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 16,
-      "start": 825,
-      "truthOutcome": "turnover",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 18,
-      "start": 865,
-      "truthOutcome": "made",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 6,
-      "start": 645,
-      "truthOutcome": "made",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 3,
-      "start": 595,
-      "truthOutcome": "missed",
-      "predictedOutcome": "turnover"
-    },
-    {
-      "possession": 5,
-      "start": 634,
-      "truthOutcome": "made",
-      "predictedOutcome": "unknown"
-    },
-    {
       "possession": 9,
       "start": 675,
       "truthOutcome": "missed",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 13,
-      "start": 743,
-      "truthOutcome": "missed",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 14,
-      "start": 764,
-      "truthOutcome": "turnover",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 29,
-      "start": 1179,
-      "truthOutcome": "made",
       "predictedOutcome": "turnover"
-    },
-    {
-      "possession": 4,
-      "start": 619,
-      "truthOutcome": "missed",
-      "predictedOutcome": "unknown"
-    },
-    {
-      "possession": 24,
-      "start": 1034,
-      "truthOutcome": "turnover",
-      "predictedOutcome": "unknown"
     }
   ]
 }

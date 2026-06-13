@@ -16,7 +16,7 @@ export interface VideoChunk {
   index: number
 }
 
-async function getVideoDurationSeconds(inputPath: string): Promise<number> {
+export async function getVideoDurationSeconds(inputPath: string): Promise<number> {
   const { stdout: raw } = await execFileAsync('ffprobe', [
     '-v', 'quiet', '-print_format', 'json', '-show_streams', inputPath,
   ], { encoding: 'utf8' })
