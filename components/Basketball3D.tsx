@@ -25,62 +25,68 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   canvas.height = h
   const ctx = canvas.getContext('2d')!
 
-  // Base leather
+  // Base leather — brick orange like a real game ball, darker toward the poles
   if (grayscale) {
     ctx.fillStyle = '#808080'
     ctx.fillRect(0, 0, w, h)
   } else {
     const g = ctx.createLinearGradient(0, 0, 0, h)
-    g.addColorStop(0, '#b34509')
-    g.addColorStop(0.5, '#d3540c')
-    g.addColorStop(1, '#a03c08')
+    g.addColorStop(0, '#8f3e10')
+    g.addColorStop(0.5, '#bf5d1f')
+    g.addColorStop(1, '#823709')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
   }
 
-  // Pebble grain
-  for (let i = 0; i < 16000; i++) {
+  // Pebble grain — dense and contrasty so it reads as rubber, not plastic
+  for (let i = 0; i < 26000; i++) {
     const x = Math.random() * w
     const y = Math.random() * h
-    const r = Math.random() * 2.4 + 0.6
+    const r = Math.random() * 2.8 + 0.8
     ctx.fillStyle = grayscale
-      ? (Math.random() < 0.5 ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.18)')
-      : (Math.random() < 0.5 ? 'rgba(255,235,210,0.05)' : 'rgba(40,10,0,0.10)')
+      ? (Math.random() < 0.5 ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.20)')
+      : (Math.random() < 0.5 ? 'rgba(255,205,160,0.07)' : 'rgba(50,16,4,0.14)')
     ctx.beginPath()
     ctx.arc(x, y, r, 0, Math.PI * 2)
     ctx.fill()
   }
 
-  // Seams — equirectangular: vertical lines = meridian circles, the equator,
-  // and two tilted great circles (sinusoids: lat = atan(tan(i)·sin(lon+φ))).
-  ctx.strokeStyle = grayscale ? '#101010' : '#1a0a03'
-  ctx.lineWidth = 13
+  // Seams — a real 8-panel basketball has exactly four:
+  //   1 equator, 1 vertical meridian circle, and 2 big OVAL side seams
+  //   (small circles centered on the sides of the ball).
+  ctx.strokeStyle = grayscale ? '#0a0a0a' : '#241007'
+  ctx.lineWidth = 16
   ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
 
-  const stroke = (fn: (t: number) => [number, number]) => {
+  const stroke = (fn: (t: number) => [number, number], close = false) => {
     ctx.beginPath()
-    for (let i = 0; i <= 512; i++) {
-      const [x, y] = fn(i / 512)
+    for (let i = 0; i <= 720; i++) {
+      const [x, y] = fn(i / 720)
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     }
+    if (close) ctx.closePath()
     ctx.stroke()
   }
 
   // Equator
   stroke(t => [t * w, h / 2])
-  // Two meridian circles → vertical lines at 0°, 90°, 180°, 270°
-  for (const fx of [0, w / 4, w / 2, (3 * w) / 4, w]) {
+  // One meridian circle → vertical lines at 0° and 180° (0/w are the same line)
+  for (const fx of [0, w / 2, w]) {
     stroke(t => [fx, t * h])
   }
-  // Two tilted circles for the curved panel seams
-  for (const phase of [Math.PI / 4, (5 * Math.PI) / 4]) {
-    const incl = 0.45 // ~26°
+  // Two oval side seams: small circles of angular radius ~54° centered on the
+  // sides of the ball (lon 90° and 270°, on the equator).
+  const rho = (54 * Math.PI) / 180
+  for (const centerLon of [Math.PI / 2, (3 * Math.PI) / 2]) {
     stroke(t => {
-      const lon = t * Math.PI * 2
-      const lat = Math.atan(Math.tan(incl) * Math.sin(lon + phase))
-      return [t * w, h / 2 - (lat / Math.PI) * h]
-    })
+      const a = t * Math.PI * 2
+      const lat = Math.asin(Math.sin(rho) * Math.cos(a))
+      const lonOffset = Math.atan2(Math.sin(rho) * Math.sin(a), Math.cos(rho))
+      const lon = centerLon + lonOffset
+      return [(lon / (Math.PI * 2)) * w, h / 2 - (lat / Math.PI) * h]
+    }, true)
   }
 
   return canvas
@@ -142,8 +148,8 @@ function SpinningBall() {
       <directionalLight position={[4, 6, 5]} intensity={2.4} />
       <pointLight position={[-5, -2, -4]} intensity={1.2} color="#f97316" />
 
-      {/* Speed glow behind the ball */}
-      <mesh position={[0, 0, -2.2]} scale={6.5}>
+      {/* Speed glow behind the ball — sized to fade out before the canvas edge */}
+      <mesh position={[0, 0, -2.2]} scale={4.6}>
         <planeGeometry />
         <meshBasicMaterial
           ref={glowMat}
@@ -190,7 +196,7 @@ export default function Basketball3D() {
       aria-label="Interactive basketball — click to spin it faster"
     >
       <Canvas
-        camera={{ position: [0, 0, 4.1], fov: 40 }}
+        camera={{ position: [0, 0, 5.4], fov: 38 }}
         gl={{ antialias: true, alpha: true }}
         dpr={[1, 2]}
       >
