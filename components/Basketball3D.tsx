@@ -83,27 +83,29 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   // from the vertical seam — widest at the equator, converging toward the
   // poles. Same pattern repeats on the back, so the ball reads correctly as
   // it spins.
-  // Even spacing: bows sit ±w/6 from each meridian center (0 and w/2), so the
-  // six vertical seams cross the equator at evenly spaced points (every w/6).
-  const BOW = w / 6
-  // Bows MERGE into the vertical meridian this far (in v) from each pole, so
-  // they meet the vertical line at a panel tip instead of only nearing it.
-  const V_MERGE = 0.13
+  // A basketball is: TWO straight seams forming a perfect cross (the vertical
+  // meridian + the horizontal equator), plus TWO curvy seams that flank the
+  // vertical line and ALMOST intersect the cross near the top and bottom —
+  // they come close to the vertical line but do NOT merge into it.
+  const BOW = w / 6        // max bow at the equator → seams evenly spaced (every w/6)
+  const GAP = w * 0.045    // how far the curvy seams stay clear of the vertical line
+  const V_TOP = 0.12       // curvy seams span this far from each pole
+  const V_BOT = 1 - V_TOP
 
-  // Equator
+  // Straight seam 1: equator (horizontal)
   strokeCurve(t => [t * w, h / 2])
-  // Vertical meridian: front center (w/2) + back center (0 / w wrap)
+  // Straight seam 2: vertical meridian — front center (w/2) + back center (0/w)
   for (const cx of [0, w / 2, w]) {
     strokeCurve(t => [cx, t * h])
   }
-  // Bowed side seams: start ON the meridian at the upper merge point, bow out
-  // to ±BOW at the equator, return to the meridian at the lower merge point.
+  // Curvy seams: near the vertical line (a GAP away) at top and bottom, bowing
+  // out to ±BOW at the equator. Drawn around the front (w/2) and back (0/w).
   for (const center of [0, w / 2]) {
     for (const dir of [1, -1]) {
       strokeCurve(t => {
-        const v = V_MERGE + t * (1 - 2 * V_MERGE)
-        const x = center + dir * BOW * Math.sin(Math.PI * t)
-        return [x, v * h]
+        const v = V_TOP + t * (V_BOT - V_TOP)
+        const offset = GAP + (BOW - GAP) * Math.sin(Math.PI * t)
+        return [center + dir * offset, v * h]
       })
     }
   }
