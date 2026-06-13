@@ -255,7 +255,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Ticker ─────────────────────────────────────────────────── */}
-      <div className="relative z-10 border-y border-orange-500/20 bg-orange-500/[0.04] py-3.5 overflow-hidden -rotate-1 scale-[1.02]">
+      <div className="relative z-10 border-y border-orange-500/20 bg-orange-500/[0.04] py-3.5 overflow-hidden">
         <div className="marquee-track flex whitespace-nowrap w-max">
           {[...TICKER_ITEMS, ...TICKER_ITEMS].map((item, i) => (
             <span key={i} className="flex items-center font-display text-lg font-semibold uppercase tracking-wider text-orange-400/90">

@@ -53,47 +53,49 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
     ctx.fill()
   }
 
-  // Seams — VERY bold near-black channels. They must read clearly at the
-  // small size the ball renders in the hero (the texture is downsampled ~7x
-  // onto the sphere), so the line is deliberately thick.
+  // Seams — bold near-black channels, sized to read clearly at the small
+  // hero display size (the texture is downsampled several times onto the sphere).
   ctx.strokeStyle = grayscale ? '#000000' : '#0b0603'
-  ctx.lineWidth = 90
+  ctx.lineWidth = 58
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
-  const stroke = (fn: (t: number) => [number, number], close = false) => {
+  // Stroke a parametric curve, breaking the path where it wraps across the
+  // texture's left/right edge so no stray line shoots across the seam.
+  const strokeCurve = (fn: (t: number) => [number, number]) => {
     ctx.beginPath()
+    let started = false
+    let prevX = 0
     for (let i = 0; i <= 720; i++) {
       const [x, y] = fn(i / 720)
-      if (i === 0) ctx.moveTo(x, y)
+      if (started && Math.abs(x - prevX) > w / 2) {
+        ctx.stroke(); ctx.beginPath(); started = false
+      }
+      if (!started) { ctx.moveTo(x, y); started = true }
       else ctx.lineTo(x, y)
+      prevX = x
     }
-    if (close) ctx.closePath()
     ctx.stroke()
   }
 
+  // A real 8-panel basketball, from the front, shows: a horizontal seam
+  // (equator), a vertical seam (meridian), and two curves that BOW outward
+  // from the vertical seam — widest at the equator, converging toward the
+  // poles. Same pattern repeats on the back, so the ball reads correctly as
+  // it spins.
+  const BOW = w * 0.16 // how far the side seams bow out, in texture px
+
   // Equator
-  stroke(t => [t * w, h / 2])
-  // One meridian circle → vertical lines at 0° and 180° (0/w are the same line)
-  for (const fx of [0, w / 2, w]) {
-    stroke(t => [fx, t * h])
+  strokeCurve(t => [t * w, h / 2])
+  // Vertical meridian: front center (w/2) + back center (wraps at 0 / w)
+  for (const cx of [0, w / 2, w]) {
+    strokeCurve(t => [cx, t * h])
   }
-  // Curved side seams: four arcs (upper + lower per side) that blend into the
-  // equator with a LONG shallow approach — raised cosine with softened tails
-  // (exponent > 1), so the curve hugs the horizontal seam for a stretch before
-  // melting into it, like a real ball.
-  const A = (48 * Math.PI) / 180  // peak latitude of the curve
-  const B = (71 * Math.PI) / 180  // half-width of the arc in longitude
-  const SOFT = 100                // higher = longer, flatter glide into the merge
-  for (const centerLon of [Math.PI / 2, (3 * Math.PI) / 2]) {
-    for (const sign of [1, -1]) {
-      stroke(t => {
-        const lonOffset = (t * 2 - 1) * B
-        const lat = sign * A * (0.5 + 0.5 * Math.cos((Math.PI * lonOffset) / B)) ** SOFT
-        const lon = centerLon + lonOffset
-        return [(lon / (Math.PI * 2)) * w, h / 2 - (lat / Math.PI) * h]
-      })
-    }
+  // Bowed side seams around the front center (w/2) and the back center (0 / w).
+  // x = center ± BOW·sin(π·v): zero bow at the poles (v=0,1), max at the equator.
+  for (const center of [w / 2, 0, w]) {
+    strokeCurve(v => [center + BOW * Math.sin(Math.PI * v), v * h])
+    strokeCurve(v => [center - BOW * Math.sin(Math.PI * v), v * h])
   }
 
   return canvas
