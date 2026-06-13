@@ -53,9 +53,11 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
     ctx.fill()
   }
 
-  // Seams — bold near-black channels like a real game ball.
-  ctx.strokeStyle = grayscale ? '#060606' : '#150a04'
-  ctx.lineWidth = 34
+  // Seams — VERY bold near-black channels. They must read clearly at the
+  // small size the ball renders in the hero (the texture is downsampled ~7x
+  // onto the sphere), so the line is deliberately thick.
+  ctx.strokeStyle = grayscale ? '#000000' : '#0b0603'
+  ctx.lineWidth = 90
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
@@ -82,7 +84,7 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   // melting into it, like a real ball.
   const A = (48 * Math.PI) / 180  // peak latitude of the curve
   const B = (71 * Math.PI) / 180  // half-width of the arc in longitude
-  const SOFT = 1.8                // higher = longer, flatter glide into the merge
+  const SOFT = 100                // higher = longer, flatter glide into the merge
   for (const centerLon of [Math.PI / 2, (3 * Math.PI) / 2]) {
     for (const sign of [1, -1]) {
       stroke(t => {
@@ -179,7 +181,7 @@ function SpinningBall() {
               ref={ballMat}
               map={colorMap}
               bumpMap={bumpMap}
-              bumpScale={1.2}
+              bumpScale={2.6}
               roughness={0.72}
               metalness={0.05}
               emissive="#f97316"

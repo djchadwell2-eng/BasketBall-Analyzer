@@ -247,7 +247,7 @@ export default function LandingPage() {
             initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.7, delay: 0.4, ease: [0.21, 0.6, 0.35, 1] }}
-            className="hidden lg:flex items-center justify-center"
+            className="flex items-center justify-center"
           >
             <Basketball3D />
           </motion.div>
