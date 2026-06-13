@@ -6,10 +6,13 @@ import * as path from 'path'
 import * as os from 'os'
 import { cleanupTempFile } from '@/lib/tempFiles'
 import type { FocusPlayer, FocusTeam } from '@/lib/types'
-import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSessionUser, isAdminEmail } from '@/lib/supabaseServer'
 
 export const maxDuration = 300
+
+// Per-account analyses per calendar month. Emails in ADMIN_EMAILS are exempt.
+const MONTHLY_ANALYSIS_LIMIT = parseInt(process.env.MONTHLY_ANALYSIS_LIMIT ?? '5', 10)
 
 const encoder = new TextEncoder()
 
@@ -76,9 +79,13 @@ async function parseUpload(request: NextRequest): Promise<UploadedFile> {
 
 async function processAnalysis(
   upload: UploadedFile,
+  userId: string,
   send: (e: object) => Promise<void>
 ): Promise<void> {
   const { videoPath, fileName, mimeType, focusPlayer, focusTeam } = upload
+  // Service-role client for all persistence: RLS is enforced for end users at
+  // the page/API boundary; this route writes on behalf of the verified user.
+  const db = getSupabaseAdmin()
 
   try {
     const allowedTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm']
@@ -102,9 +109,9 @@ async function processAnalysis(
     try {
       // Step 1: Insert the video row FIRST so it always lands in history,
       // regardless of whether the storage upload succeeds or fails.
-      const { data: videoRow, error: videoRowError } = await supabase
+      const { data: videoRow, error: videoRowError } = await db
         .from('videos')
-        .insert({ file_name: fileName, video_url: null })
+        .insert({ file_name: fileName, video_url: null, user_id: userId })
         .select('id')
         .single()
 
@@ -133,7 +140,7 @@ async function processAnalysis(
             const { data: urlData } = admin.storage.from('videos').getPublicUrl(storageKey)
             const videoUrl = urlData?.publicUrl ?? null
             if (videoUrl) {
-              await supabase.from('videos').update({ video_url: videoUrl }).eq('id', videoId)
+              await db.from('videos').update({ video_url: videoUrl }).eq('id', videoId)
               console.log('[analyze] Step 2 OK — video_url saved:', videoUrl)
             }
           }
@@ -146,7 +153,7 @@ async function processAnalysis(
         await send({ type: 'progress', pct: 88, message: 'Saving sequences...' })
 
         for (const seq of analysis.sequences) {
-          const { error: seqError } = await supabase.from('sequences').insert({
+          const { error: seqError } = await db.from('sequences').insert({
             video_id: videoId,
             sequence_index: seq.sequenceIndex,
             possession_id: seq.possessionId,
@@ -171,7 +178,7 @@ async function processAnalysis(
           if (seqError) console.error(`[analyze] Step 6 FAILED — sequence ${seq.sequenceIndex} insert:`, seqError.message)
         }
 
-        const { error: analysisError } = await supabase.from('analyses').insert({
+        const { error: analysisError } = await db.from('analyses').insert({
           video_id: videoId,
           report_text: analysis.summary,
           frame_count: analysis.frameCount,
@@ -182,7 +189,7 @@ async function processAnalysis(
         await send({ type: 'progress', pct: 92, message: 'Saving possessions...' })
 
         for (const pos of analysis.possessions) {
-          const { error: posError } = await supabase.from('possessions').insert({
+          const { error: posError } = await db.from('possessions').insert({
             video_id: videoId,
             possession_id: pos.possessionId,
             possession_type: pos.possessionType,
@@ -215,7 +222,7 @@ async function processAnalysis(
           ranked_observations: analysis.rankedObservations,
           computed_stats: analysis.computedStats,
         }
-        let { error: patternError } = await supabase.from('game_patterns').insert({
+        let { error: patternError } = await db.from('game_patterns').insert({
           ...patternRow,
           game_plan: analysis.gamePlan,
         })
@@ -223,13 +230,13 @@ async function processAnalysis(
           // Column not migrated yet — save everything else rather than losing the row.
           // Migration: alter table game_patterns add column game_plan jsonb;
           console.warn('[analyze] game_plan column missing — run the migration in supabase/migrations. Saving without it.')
-          ;({ error: patternError } = await supabase.from('game_patterns').insert(patternRow))
+          ;({ error: patternError } = await db.from('game_patterns').insert(patternRow))
         }
         if (patternError) console.error('[analyze] Step 8 FAILED — game_patterns insert:', patternError.message)
         else console.log('[analyze] Step 8 OK — game patterns inserted')
 
         if (analysis.playerReport) {
-          const { error: playerError } = await supabase.from('player_reports').insert({
+          const { error: playerError } = await db.from('player_reports').insert({
             video_id: videoId,
             jersey_number: analysis.playerReport.jerseyNumber,
             jersey_color: analysis.playerReport.jerseyColor,
@@ -291,6 +298,30 @@ async function processAnalysis(
 }
 
 export async function POST(request: NextRequest) {
+  // ── Auth gate: no session, no Gemini spend ─────────────────────────
+  const user = await getSessionUser()
+  if (!user) {
+    return Response.json({ error: 'Sign in to analyze film.' }, { status: 401 })
+  }
+
+  // ── Quota gate: count this calendar month's analyses ───────────────
+  if (!isAdminEmail(user.email)) {
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+    const { count } = await getSupabaseAdmin()
+      .from('videos')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gte('created_at', monthStart.toISOString())
+    if ((count ?? 0) >= MONTHLY_ANALYSIS_LIMIT) {
+      return Response.json(
+        { error: `Monthly limit reached (${MONTHLY_ANALYSIS_LIMIT} analyses). Your quota resets on the 1st.` },
+        { status: 429 }
+      )
+    }
+  }
+
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
   const writer = writable.getWriter()
 
@@ -304,7 +335,7 @@ export async function POST(request: NextRequest) {
 
   // Parse the multipart upload with busboy (streaming — no memory issues for large files)
   parseUpload(request)
-    .then((upload) => processAnalysis(upload, send))
+    .then((upload) => processAnalysis(upload, user.id, send))
     .catch(async (err) => {
       const message = err instanceof Error ? err.message : 'Failed to parse upload'
       console.error('[analyze] parseUpload error:', message)

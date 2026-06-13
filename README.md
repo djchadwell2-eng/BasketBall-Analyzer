@@ -126,9 +126,17 @@ npm run test:analyzer:int
 
 ---
 
+## Auth & access (invite-only)
+
+The app is gated behind Supabase Auth (email + password):
+
+- `/` is a public landing page with a request-access form; `/analyze` and `/history` require login.
+- Accounts are created manually: Supabase dashboard → Authentication → Users → Add user. Also turn **off** "Allow new users to sign up" in Authentication → Sign In / Up.
+- Run `supabase/migrations/2026-06-12_auth_rls_quota.sql` in the SQL Editor (replace `YOUR_EMAIL_HERE` first) — it adds ownership columns, Row Level Security on every table, and the access-requests table.
+- Quota: each account gets `MONTHLY_ANALYSIS_LIMIT` analyses per calendar month (default 5). Emails listed in `ADMIN_EMAILS` (comma-separated) are unlimited — put your own email there.
+
 ## Notes
 
-- Cost control is built in: the wide pass uses LOW media resolution, deep-pass bursts are capped at 15 frames, and concurrency is limited (4 wide / 4 deep) with exponential-backoff retries.
+- Cost control is built in: the wide pass uses LOW media resolution, deep-pass clips are capped at 45 seconds, and concurrency is limited (4 wide / 4 deep) with exponential-backoff retries.
 - Possessions the model isn't confident about (< 0.6) are dropped rather than hallucinated.
-- Temp files (upload, chunks, burst frames) are cleaned up after each run.
-- ⚠️ Local/experimental use only for now — API routes have no auth or rate limiting yet.
+- Temp files (upload, chunks, possession clips) are cleaned up after each run.

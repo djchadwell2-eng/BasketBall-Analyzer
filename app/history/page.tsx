@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { Folder } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseServer } from '@/lib/supabaseServer'
 import DeleteVideoButton from '@/components/DeleteVideoButton'
 import VideoFolderMenu from '@/components/VideoFolderMenu'
+import SignOutButton from '@/components/SignOutButton'
 
 export const revalidate = 0
 
@@ -68,6 +69,8 @@ function VideoRowItem({
 }
 
 export default async function HistoryPage() {
+  // Cookie-aware client: RLS scopes every query to the logged-in coach
+  const supabase = await getSupabaseServer()
   const [{ data: videos }, { data: folderData }] = await Promise.all([
     supabase
       .from('videos')
@@ -137,12 +140,15 @@ export default async function HistoryPage() {
                 )}
               </div>
             </div>
-            <Link
-              href="/"
-              className="shrink-0 mt-1 text-xs font-medium text-gray-400 hover:text-white border border-white/10 hover:border-white/20 px-3 py-1.5 rounded-full transition-all"
-            >
-              ← Analyzer
-            </Link>
+            <div className="shrink-0 mt-1 flex items-center gap-2">
+              <Link
+                href="/analyze"
+                className="text-xs font-medium text-gray-400 hover:text-white border border-white/10 hover:border-white/20 px-3 py-1.5 rounded-full transition-all"
+              >
+                ← Analyzer
+              </Link>
+              <SignOutButton />
+            </div>
           </div>
         </div>
       </div>
@@ -159,7 +165,7 @@ export default async function HistoryPage() {
               <p className="text-gray-500 text-sm">Upload your first game film to get started.</p>
             </div>
             <Link
-              href="/"
+              href="/analyze"
               className="mt-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-500 rounded-xl text-sm font-semibold transition-colors"
             >
               Upload a Video →

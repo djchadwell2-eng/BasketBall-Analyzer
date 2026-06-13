@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseServer } from '@/lib/supabaseServer'
 import TitleEditor from '@/components/TitleEditor'
 import AnalysisTabs from '@/components/AnalysisTabs'
 import type { SequenceResult, PossessionResult } from '@/components/FilmRoom'
@@ -15,6 +15,8 @@ interface Props {
 export default async function HistoryDetailPage({ params }: Props) {
   const { id } = await params
 
+  // Cookie-aware client: RLS guarantees a coach can only open their own games
+  const supabase = await getSupabaseServer()
   const [{ data: analysisRow }, { data: videoRow }, { data: sequenceRows }, { data: possessionRows }, { data: patternRow }, { data: playerRow }] = await Promise.all([
     supabase
       .from('analyses')
@@ -150,7 +152,7 @@ export default async function HistoryDetailPage({ params }: Props) {
           <div className="flex items-center justify-between gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 text-[11px] text-gray-600 mb-2">
-                <Link href="/" className="hover:text-gray-400 transition-colors">Analyzer</Link>
+                <Link href="/analyze" className="hover:text-gray-400 transition-colors">Analyzer</Link>
                 <span>/</span>
                 <Link href="/history" className="hover:text-gray-400 transition-colors">History</Link>
                 <span>/</span>

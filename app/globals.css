@@ -26,6 +26,15 @@
   background-size: 24px 24px;
 }
 
+/* Landing-page ticker */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee 28s linear infinite;
+}
+
 /* Fine noise grain so large dark surfaces don't look flat */
 .grain::before {
   content: '';

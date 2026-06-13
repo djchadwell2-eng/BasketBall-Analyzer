@@ -1,11 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSessionUser } from '@/lib/supabaseServer'
+
+/** Returns the video row only if the logged-in user owns it. */
+async function getOwnedVideo(id: string) {
+  const user = await getSessionUser()
+  if (!user) return { user: null, video: null }
+  const admin = getSupabaseAdmin()
+  const { data: video } = await admin
+    .from('videos')
+    .select('id, user_id, video_url')
+    .eq('id', id)
+    .single()
+  if (!video || video.user_id !== user.id) return { user, video: null }
+  return { user, video }
+}
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
+  const { video } = await getOwnedVideo(id)
+  if (!video) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
   const { folder_id } = await req.json()
   const admin = getSupabaseAdmin()
   await admin.from('videos').update({ folder_id: folder_id ?? null }).eq('id', id)
@@ -19,14 +37,10 @@ export async function DELETE(
   const { id } = await params
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  const admin = getSupabaseAdmin()
+  const { video } = await getOwnedVideo(id)
+  if (!video) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Get video_url before deleting so we can clean up storage
-  const { data: videoRow } = await admin
-    .from('videos')
-    .select('video_url')
-    .eq('id', id)
-    .single()
+  const admin = getSupabaseAdmin()
 
   // Delete all related rows (order matters — child tables first)
   await admin.from('player_reports').delete().eq('video_id', id)
@@ -37,7 +51,7 @@ export async function DELETE(
   await admin.from('videos').delete().eq('id', id)
 
   // Best-effort storage cleanup — extract key from public URL
-  const videoUrl = videoRow?.video_url as string | null
+  const videoUrl = video.video_url as string | null
   if (videoUrl) {
     try {
       // URL format: https://<project>.supabase.co/storage/v1/object/public/videos/<key>
