@@ -76,17 +76,21 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   for (const fx of [0, w / 2, w]) {
     stroke(t => [fx, t * h])
   }
-  // Two oval side seams: small circles of angular radius ~54° centered on the
-  // sides of the ball (lon 90° and 270°, on the equator).
-  const rho = (54 * Math.PI) / 180
+  // Curved side seams: on a real ball these are four arcs (upper + lower on
+  // each side) that flatten out and MERGE into the equator tangentially —
+  // lat = ±A·cos²(π·x/2B) has zero slope at the merge points, so the panels
+  // taper to thin points just like the reference ball.
+  const A = (50 * Math.PI) / 180 // peak latitude of the curve
+  const B = (62 * Math.PI) / 180 // half-width: merges 62° either side of center
   for (const centerLon of [Math.PI / 2, (3 * Math.PI) / 2]) {
-    stroke(t => {
-      const a = t * Math.PI * 2
-      const lat = Math.asin(Math.sin(rho) * Math.cos(a))
-      const lonOffset = Math.atan2(Math.sin(rho) * Math.sin(a), Math.cos(rho))
-      const lon = centerLon + lonOffset
-      return [(lon / (Math.PI * 2)) * w, h / 2 - (lat / Math.PI) * h]
-    }, true)
+    for (const sign of [1, -1]) {
+      stroke(t => {
+        const lonOffset = (t * 2 - 1) * B
+        const lat = sign * A * Math.cos((Math.PI * lonOffset) / (2 * B)) ** 2
+        const lon = centerLon + lonOffset
+        return [(lon / (Math.PI * 2)) * w, h / 2 - (lat / Math.PI) * h]
+      })
+    }
   }
 
   return canvas
@@ -169,7 +173,7 @@ function SpinningBall() {
             onPointerOver={() => { document.body.style.cursor = 'pointer' }}
             onPointerOut={() => { document.body.style.cursor = '' }}
           >
-            <sphereGeometry args={[1.45, 96, 96]} />
+            <sphereGeometry args={[1.58, 96, 96]} />
             <meshStandardMaterial
               ref={ballMat}
               map={colorMap}
@@ -192,7 +196,7 @@ export default function Basketball3D() {
     <motion.div
       animate={{ y: [0, -14, 0] }}
       transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
-      className="relative w-48 h-48 sm:w-72 sm:h-72 select-none"
+      className="relative w-60 h-60 sm:w-[24rem] sm:h-[24rem] select-none"
       aria-label="Interactive basketball — click to spin it faster"
     >
       <Canvas
