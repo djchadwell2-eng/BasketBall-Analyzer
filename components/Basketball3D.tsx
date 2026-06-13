@@ -18,8 +18,10 @@ const FRICTION   = 1.1
 // ─────────────────────────────────────────────────────────────────────────────
 
 function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
-  const w = 2048
-  const h = 1024
+  // High resolution so the seams render with crisp, anti-aliased edges when
+  // wrapped onto the sphere.
+  const w = 4096
+  const h = 2048
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
@@ -39,10 +41,10 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   }
 
   // Pebble grain — dense and contrasty so it reads as rubber, not plastic
-  for (let i = 0; i < 26000; i++) {
+  for (let i = 0; i < 95000; i++) {
     const x = Math.random() * w
     const y = Math.random() * h
-    const r = Math.random() * 2.8 + 0.8
+    const r = Math.random() * 3 + 1
     ctx.fillStyle = grayscale
       ? (Math.random() < 0.5 ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.20)')
       : (Math.random() < 0.5 ? 'rgba(255,205,160,0.07)' : 'rgba(50,16,4,0.14)')
@@ -51,11 +53,9 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
     ctx.fill()
   }
 
-  // Seams — a real 8-panel basketball has exactly four:
-  //   1 equator, 1 vertical meridian circle, and 2 big OVAL side seams
-  //   (small circles centered on the sides of the ball).
-  ctx.strokeStyle = grayscale ? '#0a0a0a' : '#241007'
-  ctx.lineWidth = 16
+  // Seams — bold near-black channels like a real game ball.
+  ctx.strokeStyle = grayscale ? '#060606' : '#150a04'
+  ctx.lineWidth = 34
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
@@ -76,17 +76,18 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   for (const fx of [0, w / 2, w]) {
     stroke(t => [fx, t * h])
   }
-  // Curved side seams: on a real ball these are four arcs (upper + lower on
-  // each side) that flatten out and MERGE into the equator tangentially —
-  // lat = ±A·cos²(π·x/2B) has zero slope at the merge points, so the panels
-  // taper to thin points just like the reference ball.
-  const A = (50 * Math.PI) / 180 // peak latitude of the curve
-  const B = (62 * Math.PI) / 180 // half-width: merges 62° either side of center
+  // Curved side seams: four arcs (upper + lower per side) that blend into the
+  // equator with a LONG shallow approach — raised cosine with softened tails
+  // (exponent > 1), so the curve hugs the horizontal seam for a stretch before
+  // melting into it, like a real ball.
+  const A = (48 * Math.PI) / 180  // peak latitude of the curve
+  const B = (71 * Math.PI) / 180  // half-width of the arc in longitude
+  const SOFT = 1.8                // higher = longer, flatter glide into the merge
   for (const centerLon of [Math.PI / 2, (3 * Math.PI) / 2]) {
     for (const sign of [1, -1]) {
       stroke(t => {
         const lonOffset = (t * 2 - 1) * B
-        const lat = sign * A * Math.cos((Math.PI * lonOffset) / (2 * B)) ** 2
+        const lat = sign * A * (0.5 + 0.5 * Math.cos((Math.PI * lonOffset) / B)) ** SOFT
         const lon = centerLon + lonOffset
         return [(lon / (Math.PI * 2)) * w, h / 2 - (lat / Math.PI) * h]
       })
