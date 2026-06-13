@@ -56,7 +56,7 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   // Seams — bold near-black channels, sized to read clearly at the small
   // hero display size (the texture is downsampled several times onto the sphere).
   ctx.strokeStyle = grayscale ? '#000000' : '#0b0603'
-  ctx.lineWidth = 58
+  ctx.lineWidth = 46
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
@@ -83,19 +83,29 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
   // from the vertical seam — widest at the equator, converging toward the
   // poles. Same pattern repeats on the back, so the ball reads correctly as
   // it spins.
-  const BOW = w * 0.16 // how far the side seams bow out, in texture px
+  // Even spacing: bows sit ±w/6 from each meridian center (0 and w/2), so the
+  // six vertical seams cross the equator at evenly spaced points (every w/6).
+  const BOW = w / 6
+  // Bows MERGE into the vertical meridian this far (in v) from each pole, so
+  // they meet the vertical line at a panel tip instead of only nearing it.
+  const V_MERGE = 0.13
 
   // Equator
   strokeCurve(t => [t * w, h / 2])
-  // Vertical meridian: front center (w/2) + back center (wraps at 0 / w)
+  // Vertical meridian: front center (w/2) + back center (0 / w wrap)
   for (const cx of [0, w / 2, w]) {
     strokeCurve(t => [cx, t * h])
   }
-  // Bowed side seams around the front center (w/2) and the back center (0 / w).
-  // x = center ± BOW·sin(π·v): zero bow at the poles (v=0,1), max at the equator.
-  for (const center of [w / 2, 0, w]) {
-    strokeCurve(v => [center + BOW * Math.sin(Math.PI * v), v * h])
-    strokeCurve(v => [center - BOW * Math.sin(Math.PI * v), v * h])
+  // Bowed side seams: start ON the meridian at the upper merge point, bow out
+  // to ±BOW at the equator, return to the meridian at the lower merge point.
+  for (const center of [0, w / 2]) {
+    for (const dir of [1, -1]) {
+      strokeCurve(t => {
+        const v = V_MERGE + t * (1 - 2 * V_MERGE)
+        const x = center + dir * BOW * Math.sin(Math.PI * t)
+        return [x, v * h]
+      })
+    }
   }
 
   return canvas
