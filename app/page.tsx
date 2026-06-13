@@ -2,78 +2,13 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { motion, useInView, useMotionValue, useAnimationFrame } from 'framer-motion'
+import dynamic from 'next/dynamic'
+import { motion, useInView } from 'framer-motion'
 import { Film, FileText, Crosshair, ArrowRight, CheckCircle2, Upload, BrainCircuit, Trophy } from 'lucide-react'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Interactive basketball — drag it, flick it, it springs home.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const BASE_SPIN_DEG_PER_SEC = 16    // the lazy idle rotation
-const TAP_SPIN_BOOST        = 840   // each click rips it this much faster
-const MAX_SPIN              = 2800  // mash-clicking caps out here
-const SPIN_FRICTION         = 1.1   // how quickly the fast spin settles back down
-
-function Basketball() {
-  const rotation = useMotionValue(0)
-  const spinVelocity = useRef(BASE_SPIN_DEG_PER_SEC)
-
-  // Constant rotation with friction: extra speed from clicks decays
-  // exponentially back to the slow base spin — it never fully stops.
-  useAnimationFrame((_, delta) => {
-    const dt = delta / 1000
-    spinVelocity.current =
-      BASE_SPIN_DEG_PER_SEC +
-      (spinVelocity.current - BASE_SPIN_DEG_PER_SEC) * Math.exp(-dt * SPIN_FRICTION)
-    rotation.set((rotation.get() + spinVelocity.current * dt) % 360)
-  })
-
-  function ripIt() {
-    spinVelocity.current = Math.min(spinVelocity.current + TAP_SPIN_BOOST, MAX_SPIN)
-  }
-
-  return (
-    <motion.div
-      drag
-      dragSnapToOrigin
-      dragTransition={{ bounceStiffness: 200, bounceDamping: 9 }}
-      onTap={ripIt}
-      whileDrag={{ scale: 1.12 }}
-      whileHover={{ scale: 1.05 }}
-      animate={{ y: [0, -14, 0] }}
-      transition={{ y: { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } }}
-      className="relative w-40 h-40 sm:w-56 sm:h-56 cursor-grab active:cursor-grabbing select-none"
-      style={{ touchAction: 'none' }}
-      aria-label="Interactive basketball — click to spin it, drag to flick it"
-    >
-      <motion.svg
-        viewBox="0 0 200 200"
-        className="w-full h-full drop-shadow-[0_25px_45px_rgba(234,88,12,0.35)]"
-        style={{ rotate: rotation }}
-      >
-        <defs>
-          <radialGradient id="ballGrad" cx="35%" cy="30%" r="80%">
-            <stop offset="0%" stopColor="#fb923c" />
-            <stop offset="55%" stopColor="#ea580c" />
-            <stop offset="100%" stopColor="#9a3412" />
-          </radialGradient>
-        </defs>
-        <circle cx="100" cy="100" r="96" fill="url(#ballGrad)" />
-        {/* Seams */}
-        <g stroke="#431407" strokeWidth="3.5" fill="none" strokeLinecap="round" opacity="0.85">
-          <path d="M100 4 v192" />
-          <path d="M4 100 h192" />
-          <path d="M28 32 q44 68 0 136" />
-          <path d="M172 32 q-44 68 0 136" />
-        </g>
-        {/* Sheen */}
-        <ellipse cx="68" cy="55" rx="34" ry="20" fill="white" opacity="0.14" transform="rotate(-25 68 55)" />
-      </motion.svg>
-      {/* Floor shadow (doesn't rotate with the ball) */}
-      <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 w-28 h-4 rounded-full bg-black/60 blur-md" />
-    </motion.div>
-  )
-}
+// Real 3D ball (three.js) — lazy-loaded so the headline renders instantly
+// and the WebGL bundle arrives a beat later.
+const Basketball3D = dynamic(() => import('@/components/Basketball3D'), { ssr: false })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request access form
@@ -314,7 +249,7 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.4, ease: [0.21, 0.6, 0.35, 1] }}
             className="hidden lg:flex items-center justify-center"
           >
-            <Basketball />
+            <Basketball3D />
           </motion.div>
         </div>
       </section>
