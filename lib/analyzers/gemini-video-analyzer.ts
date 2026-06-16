@@ -51,10 +51,18 @@ const WIDE_MAX_OUTPUT_TOKENS  = 16000
 // see how the possession ENDS and hear rim/whistle/buzzer evidence. The old
 // JPEG-burst approach showed ~3s around peak motion and almost never saw the
 // shot — outcomes came back "unknown" on most possessions.
-export const DEEP_CLIP_PAD_BEFORE = 2   // seconds before the possession start
-export const DEEP_CLIP_PAD_AFTER  = 3   // seconds after the end (shot landing, scoreboard update)
-const DEEP_CLIP_MAX_SECONDS       = 45  // cost ceiling per possession clip
+export const DEEP_CLIP_PAD_BEFORE = 2    // seconds before the possession start
+export const DEEP_CLIP_PAD_AFTER  = 9    // seconds after the end — scoreboards update ~4-6s after a shot
+const DEEP_CLIP_MAX_SECONDS       = 50   // cost ceiling per possession clip
 const DEEP_MAX_OUTPUT_TOKENS     = 8000
+
+// High-res scoreboard crops are the most reliable outcome signal (a score
+// increase = a made basket, and tells us 2 vs 3). The crop region is tuned for
+// the bottom-left broadcast score bug; the prompt tells the model to ignore the
+// crops if they don't actually show a scoreboard, so other footage degrades safely.
+const SCOREBOARD_CROP_FILTER = "crop=iw*0.34:ih*0.22:0:ih*0.78,scale=-2:260"
+// Seconds after the possession END to sample the scoreboard (catches operator lag)
+const SCOREBOARD_AFTER_OFFSETS = [4, 8]
 const SYNTHESIS_MAX_OUTPUT_TOKENS = 8000  // includes the game_plan section
 
 const MAX_CONCURRENCY  = 4  // wide-pass (1 video request per chunk)
@@ -562,17 +570,29 @@ function buildDeepClipPrompt(possessionId: number, startTs: number, endTs: numbe
     : ''
   return `Basketball film analyst. You are watching ONE possession as a video clip WITH AUDIO. In the full game this is possession ${possessionId}, game time ${startTs.toFixed(1)}s–${endTs.toFixed(1)}s.
 ${teamBlock}
-EVIDENCE — use ALL of it before deciding the outcome:
-- VIDEO: watch to the very end of the clip. The outcome usually happens in the final seconds.
-- AUDIO: a clean net "swish" or rim clank, the referee's whistle, the buzzer, and crowd reaction are strong outcome evidence.
-- SCOREBOARD: if a scoreboard is visible, read the score early and late in the clip. A score change is DEFINITIVE proof of a made basket (+2 or +3 tells you the shot value).
+EVIDENCE — decide the OUTCOME primarily from the SCOREBOARD:
+- SCOREBOARD CROPS: attached are high-resolution close-ups of the on-screen scoreboard,
+  taken at the START of the possession and a few seconds AFTER it ended (the score
+  updates a few seconds after a basket). Read BOTH teams' scores in each crop.
+  * If a team's score INCREASED across the crops → the possession is "made"; the size
+    of the increase is the shot value (+2 or +3).
+  * If NO score increased and a shot was clearly attempted → "missed".
+  * If the ball changed hands with no shot attempt → "turnover" or "defensive-stop".
+  * If the crops do not show a readable scoreboard, ignore them and judge from the video.
+- VIDEO/AUDIO: secondary. Watch to the end for the shot; crowd noise is NOT reliable
+  (crowds react to makes, near-misses, and big defense alike) — do not infer a make from noise.
 
 RULES (all mandatory):
-1. Only describe what is physically visible or audible. Never invent.
-2. Use "appears to"/"seems to" for anything inferred.
-3. OUTCOME: "made"=ball through rim, scoreboard increase, or clear make evidence (net sound + crowd); "missed"=ball off rim/backboard with no score change; "turnover"=steal/OOB/violation; "defensive-stop"=defense clearly ends the possession without a shot; "unknown"=ONLY if the clip truly cuts away before the possession resolves.
-4. Assign action_types ONLY if movement pattern is clearly visible.
-5. SHOTS: only assign catch_shoot/pull_up if you SEE a shooting motion or ball released toward the rim. If the ball is passed to a teammate, do NOT add catch_shoot/pull_up and do NOT assign a made/missed outcome. When unsure between pass and shot, treat it as a PASS.
+1. Only describe what is physically visible or on the scoreboard. Never invent.
+2. NEVER default to "made". Mark "made" ONLY when the scoreboard increases OR you clearly
+   see the ball go through the net. A shot you cannot confirm went in is "missed" or
+   "unknown" — not "made". (Most possessions are NOT made baskets.)
+3. OUTCOME: "made"=scoreboard increase or ball clearly through the net; "missed"=shot
+   attempted, no score change; "turnover"=steal/OOB/violation/lost ball; "defensive-stop"=
+   defense ends the possession with no shot; "unknown"=ONLY if you truly cannot tell.
+4. Assign action_types ONLY if the movement pattern is clearly visible.
+5. SHOTS: only assign catch_shoot/pull_up if you SEE a shooting motion or ball released
+   toward the rim. If the ball is passed to a teammate, do NOT add catch_shoot/pull_up.
 6. Unknown or uncertain fields → "unknown" or null.
 
 DEFENSE (fill all 4 fields, no skipping):
@@ -588,6 +608,29 @@ possession_type: half_court|transition|pick_and_roll|isolation|post_up|scramble|
 action_types: drive|kick_out|pull_up|catch_shoot|pick_roll|post_up|iso|cut|ball_reversal|transition_push|corner_three|dribble_handoff|press_break
 outcome: made|missed|turnover|defensive_stop|unknown  direction: left|right|center|unknown
 confidence: 0.8-1.0=clearly visible; 0.5-0.79=inferred (use hedged prose); <0.5={"possession_id":${possessionId},"confidence":0.0,"outcome":"unknown"} only`
+}
+
+/**
+ * Extracts high-resolution crops of the on-screen scoreboard at the possession
+ * start and a few seconds after it ends (to catch the post-shot score update,
+ * which lags the shot by ~4-6s). Returned as base64 JPEGs. Best-effort — returns
+ * whatever it could grab. Exported so the cheap bench can use the same crops.
+ */
+export async function extractScoreboardCrops(videoPath: string, startTs: number, endTs: number): Promise<string[]> {
+  const times = [Math.max(0, startTs), ...SCOREBOARD_AFTER_OFFSETS.map(o => endTs + o)]
+  const crops: string[] = []
+  for (const t of times) {
+    const out = path.join(os.tmpdir(), `sb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`)
+    try {
+      await execFileAsync('ffmpeg', [
+        '-y', '-ss', t.toFixed(2), '-i', videoPath,
+        '-frames:v', '1', '-vf', SCOREBOARD_CROP_FILTER, '-q:v', '3', out,
+      ], { maxBuffer: 10 * 1024 * 1024 })
+      crops.push((await fs.promises.readFile(out)).toString('base64'))
+    } catch { /* frame may not exist near end of file — skip */ }
+    fs.promises.unlink(out).catch(() => {})
+  }
+  return crops
 }
 
 /** Cuts one possession (plus padding) into a small 480p clip, keeping audio. */
@@ -668,12 +711,17 @@ async function analyzeOnePossession(
     const { uri, name } = await uploadAndPoll(clipPath, `deep_${possession.possessionId}`, fileManager)
     uploadedName = name
 
+    // High-res scoreboard crops — the primary make/miss evidence
+    const scoreboardCrops = await extractScoreboardCrops(videoPath, possession.startTs, possession.endTs)
+    const scoreboardParts = scoreboardCrops.map(b64 => ({ inlineData: { mimeType: 'image/jpeg', data: b64 } }))
+
     const prompt = buildDeepClipPrompt(possession.possessionId, possession.startTs, possession.endTs, focusTeam)
 
     rawText = await withRetry(`possession ${possessionIndex} deep`, async () => {
       const res = await model.generateContent({
         contents: [{ role: 'user', parts: [
           { fileData: { mimeType: 'video/mp4', fileUri: uri } },
+          ...scoreboardParts,
           { text: prompt },
         ]}],
         generationConfig: {
@@ -1228,7 +1276,8 @@ export async function analyzeClipForOutcome(
   clipPath: string,
   startTs = 0,
   endTs = 0,
-  focusTeam: FocusTeam | null = null
+  focusTeam: FocusTeam | null = null,
+  scoreboardCrops: string[] = []
 ): Promise<{ outcome: string; rawOutcome: string; confidence: number; promptTokens: number; outputTokens: number }> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('[analyzeClipForOutcome] GEMINI_API_KEY is not set.')
@@ -1242,11 +1291,13 @@ export async function analyzeClipForOutcome(
   try {
     const { uri, name } = await uploadAndPoll(clipPath, `bench_${Date.now()}`, fileManager)
     uploadedName = name
+    const scoreboardParts = scoreboardCrops.map(b64 => ({ inlineData: { mimeType: 'image/jpeg', data: b64 } }))
     const prompt = buildDeepClipPrompt(0, startTs, endTs, focusTeam)
     const rawText = await withRetry('bench deep', async () => {
       const res = await model.generateContent({
         contents: [{ role: 'user', parts: [
           { fileData: { mimeType: 'video/mp4', fileUri: uri } },
+          ...scoreboardParts,
           { text: prompt },
         ]}],
         generationConfig: {

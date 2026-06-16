@@ -51,10 +51,10 @@ function sample<T>(arr: T[], n: number): T[] {
   return Array.from({ length: n }, (_, i) => arr[Math.floor(i * step)])
 }
 
-/** Same window + resolution the real deep pass uses (start-2s .. end+3s, 480p). */
+/** Same window + resolution the real deep pass uses (start-2s .. end+9s, 480p). */
 async function extractClip(video: string, start: number, end: number, out: string): Promise<void> {
   const clipStart = Math.max(0, start - 2)
-  const dur = (end + 3) - clipStart
+  const dur = (end + 9) - clipStart
   await execFileAsync('ffmpeg', [
     '-y', '-ss', clipStart.toFixed(2), '-t', dur.toFixed(2), '-i', video,
     '-vf', "scale=-2:480", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
@@ -91,7 +91,7 @@ async function main() {
 
   fs.mkdirSync(CLIPS_DIR, { recursive: true })
   const labelsBase = path.basename(labelsPath, path.extname(labelsPath))
-  const { analyzeClipForOutcome } = await import('../lib/analyzers/gemini-video-analyzer')
+  const { analyzeClipForOutcome, extractScoreboardCrops } = await import('../lib/analyzers/gemini-video-analyzer')
 
   type Row = { p: GroundTruthPossession; predicted: string; raw: string; conf: number }
   const rows: Row[] = []
@@ -101,7 +101,8 @@ async function main() {
   for (const p of chosen) {
     const clip = path.join(CLIPS_DIR, `${labelsBase}_p${p.possession}.mp4`)
     if (fresh || !fs.existsSync(clip)) await extractClip(videoPath, p.start, p.end, clip)
-    const r = await analyzeClipForOutcome(clip, p.start, p.end)
+    const crops = await extractScoreboardCrops(videoPath, p.start, p.end)
+    const r = await analyzeClipForOutcome(clip, p.start, p.end, null, crops)
     promptTokens += r.promptTokens
     outputTokens += r.outputTokens
     rows.push({ p, predicted: r.outcome, raw: r.rawOutcome, conf: r.confidence })
