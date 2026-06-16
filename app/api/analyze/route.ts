@@ -1,20 +1,51 @@
 import { NextRequest } from 'next/server'
 import Busboy from 'busboy'
 import { Readable } from 'stream'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { cleanupTempFile } from '@/lib/tempFiles'
+import { getVideoDurationSeconds } from '@/lib/analyzers/chunker'
 import type { FocusPlayer, FocusTeam } from '@/lib/types'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { getSessionUser, isAdminEmail } from '@/lib/supabaseServer'
+
+const execFileAsync = promisify(execFile)
 
 export const maxDuration = 300
 
 // Per-account analyses per calendar month. Emails in ADMIN_EMAILS are exempt.
 const MONTHLY_ANALYSIS_LIMIT = parseInt(process.env.MONTHLY_ANALYSIS_LIMIT ?? '5', 10)
 
+// Supabase free-tier per-file storage cap is 50 MB. Stay safely under it.
+const STORAGE_MAX_BYTES = 49 * 1024 * 1024
+const STORAGE_TARGET_MB = 44            // aim here so we land under the cap
+const STORAGE_MIN_VIDEO_KBPS = 120      // below this, quality isn't worth storing
+
 const encoder = new TextEncoder()
+
+/**
+ * Re-encodes a video to a web-friendly MP4 sized to fit the storage cap:
+ * capped at 720p, with a bitrate computed from the duration. Returns the temp
+ * path of the compressed file.
+ */
+async function compressForStorage(srcPath: string, durationSec: number): Promise<string> {
+  const targetTotalKbps = Math.floor((STORAGE_TARGET_MB * 1024 * 8) / durationSec)
+  const videoKbps = Math.max(targetTotalKbps - 96, STORAGE_MIN_VIDEO_KBPS)
+  const outPath = path.join(os.tmpdir(), `bball_store_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp4`)
+  await execFileAsync('ffmpeg', [
+    '-y', '-i', srcPath,
+    '-vf', "scale=-2:'min(720,ih)'",
+    '-c:v', 'libx264', '-preset', 'veryfast',
+    '-b:v', `${videoKbps}k`, '-maxrate', `${Math.floor(videoKbps * 1.4)}k`, '-bufsize', `${videoKbps * 2}k`,
+    '-c:a', 'aac', '-b:a', '96k',
+    '-movflags', '+faststart',
+    outPath,
+  ], { maxBuffer: 10 * 1024 * 1024 })
+  return outPath
+}
 
 interface UploadedFile {
   videoPath: string
@@ -122,30 +153,61 @@ async function processAnalysis(
         console.log('[analyze] Step 1 OK — video row inserted, id =', videoId)
       }
 
-      // Step 2: Best-effort storage upload — streamed to avoid loading large files into RAM.
-      // Failure here is non-fatal; the video row is already saved above.
+      // Step 2: Save the video to storage for playback in History. Supabase's
+      // free tier caps files at 50 MB, so anything bigger is compressed to fit
+      // first. Failure here is non-fatal — the analysis row is already saved.
       if (videoId) {
+        let tempCompressed: string | null = null
         try {
           const admin = getSupabaseAdmin()
-          const ext = path.extname(fileName) || '.mp4'
-          const storageKey = `${sessionId}${ext}`
-          const fileStream = fs.createReadStream(videoPath)
-          const fileSizeMB = (fs.statSync(videoPath).size / 1024 / 1024).toFixed(1)
-          console.log(`[analyze] Step 2: uploading to storage — key=${storageKey} size=${fileSizeMB} MB`)
-          const { error: uploadError } = await admin.storage.from('videos').upload(storageKey, fileStream, { contentType: mimeType, upsert: false })
-          if (uploadError) {
-            uploadDiagnostic = uploadError.message
-            console.error('[analyze] Step 2 FAILED — storage upload error:', uploadError.message)
+          const storageKey = `${sessionId}.mp4`
+          const rawBytes = fs.statSync(videoPath).size
+          let uploadPath = videoPath
+
+          if (rawBytes > STORAGE_MAX_BYTES) {
+            await send({ type: 'progress', pct: 86, message: 'Compressing video for storage...' })
+            let duration = 0
+            try { duration = await getVideoDurationSeconds(videoPath) } catch {}
+            const feasibleKbps = duration > 0 ? Math.floor((STORAGE_TARGET_MB * 1024 * 8) / duration) - 96 : -1
+            if (duration > 0 && feasibleKbps >= STORAGE_MIN_VIDEO_KBPS) {
+              try {
+                console.log(`[analyze] Step 2: compressing ${(rawBytes / 1024 / 1024).toFixed(0)} MB / ${duration.toFixed(0)}s for storage`)
+                tempCompressed = await compressForStorage(videoPath, duration)
+                uploadPath = tempCompressed
+              } catch (e) {
+                console.error('[analyze] Step 2 compress failed:', e)
+              }
+            }
+          }
+
+          const finalBytes = fs.statSync(uploadPath).size
+          if (finalBytes > STORAGE_MAX_BYTES) {
+            uploadDiagnostic =
+              `This video is too long to store for playback on the current plan ` +
+              `(${(finalBytes / 1024 / 1024).toFixed(0)} MB; the limit is 50 MB). ` +
+              `The analysis is fully saved — upload a shorter clip or a single quarter to enable video playback in History.`
+            console.warn(`[analyze] Step 2 SKIP — ${(finalBytes / 1024 / 1024).toFixed(0)} MB exceeds the 50 MB cap`)
           } else {
-            const { data: urlData } = admin.storage.from('videos').getPublicUrl(storageKey)
-            const videoUrl = urlData?.publicUrl ?? null
-            if (videoUrl) {
-              await db.from('videos').update({ video_url: videoUrl }).eq('id', videoId)
-              console.log('[analyze] Step 2 OK — video_url saved:', videoUrl)
+            // Buffer upload (file is now <= ~49 MB) — more reliable than a Node stream.
+            const fileBuf = await fs.promises.readFile(uploadPath)
+            console.log(`[analyze] Step 2: uploading ${(finalBytes / 1024 / 1024).toFixed(1)} MB to storage — key=${storageKey}`)
+            const { error: uploadError } = await admin.storage.from('videos').upload(storageKey, fileBuf, { contentType: 'video/mp4', upsert: false })
+            if (uploadError) {
+              uploadDiagnostic = uploadError.message
+              console.error('[analyze] Step 2 FAILED — storage upload error:', uploadError.message)
+            } else {
+              const { data: urlData } = admin.storage.from('videos').getPublicUrl(storageKey)
+              const videoUrl = urlData?.publicUrl ?? null
+              if (videoUrl) {
+                await db.from('videos').update({ video_url: videoUrl }).eq('id', videoId)
+                console.log('[analyze] Step 2 OK — video_url saved:', videoUrl)
+              }
             }
           }
         } catch (storageErr) {
           console.error('[analyze] Step 2 ERROR (non-fatal):', storageErr)
+        } finally {
+          if (tempCompressed) fs.promises.unlink(tempCompressed).catch(() => {})
         }
       }
 

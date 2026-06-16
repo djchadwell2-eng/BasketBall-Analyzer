@@ -350,10 +350,10 @@ export default function HomePage() {
         {appState === 'done' && videoURL && (
           <div className="space-y-8">
 
-            {/* Upload diagnostic — shown when video file couldn't be saved to storage */}
+            {/* Upload diagnostic — shown when the video couldn't be saved to storage */}
             {uploadDiagnostic && (
-              <div className="max-w-2xl p-3 bg-amber-500/[0.08] border border-amber-500/20 rounded-xl text-amber-400 text-xs">
-                Video not saved to cloud storage — analysis is saved but playback won&apos;t be available in History. ({uploadDiagnostic})
+              <div className="max-w-2xl p-3 bg-amber-500/[0.08] border border-amber-500/20 rounded-xl text-amber-400 text-xs leading-relaxed">
+                {uploadDiagnostic}
               </div>
             )}
 
