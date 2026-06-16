@@ -18,6 +18,8 @@ yarn-error.log*
 
 # local game footage for evals — never commit video files
 /eval/videos/
+# cached possession clips for the outcome bench — local only
+/eval/clips/
 
 .vercel
 *.tsbuildinfo

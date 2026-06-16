@@ -1211,3 +1211,55 @@ export async function analyzeVideoWithGemini(
 
 // Keep parseEvents exported-adjacent (used by tests / downstream if any)
 export { parseEvents }
+
+// =============================================================================
+// Cheap eval hook — run the deep pass on ONE pre-extracted clip and return its
+// outcome. eval/bench-outcomes.ts uses this to iterate on the deep-pass prompt
+// and resolution against a small fixed set of clips for ~$0.50, instead of
+// re-analyzing a whole game (~$10) on every change.
+// =============================================================================
+export async function analyzeClipForOutcome(
+  clipPath: string,
+  startTs = 0,
+  endTs = 0,
+  focusTeam: FocusTeam | null = null
+): Promise<{ outcome: string; rawOutcome: string; confidence: number; promptTokens: number; outputTokens: number }> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('[analyzeClipForOutcome] GEMINI_API_KEY is not set.')
+  const genAI = new GoogleGenerativeAI(apiKey)
+  const fileManager = new GoogleAIFileManager(apiKey)
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
+
+  let uploadedName: string | undefined
+  let promptTokens = 0
+  let outputTokens = 0
+  try {
+    const { uri, name } = await uploadAndPoll(clipPath, `bench_${Date.now()}`, fileManager)
+    uploadedName = name
+    const prompt = buildDeepClipPrompt(0, startTs, endTs, focusTeam)
+    const rawText = await withRetry('bench deep', async () => {
+      const res = await model.generateContent({
+        contents: [{ role: 'user', parts: [
+          { fileData: { mimeType: 'video/mp4', fileUri: uri } },
+          { text: prompt },
+        ]}],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          maxOutputTokens: DEEP_MAX_OUTPUT_TOKENS,
+          mediaResolution: MEDIA_RESOLUTION,
+        } as ExtendedGenerationConfig,
+      })
+      const u = res.response.usageMetadata
+      if (u) { promptTokens = u.promptTokenCount ?? 0; outputTokens = (u.totalTokenCount ?? 0) - promptTokens }
+      return stripFences(res.response.text())
+    })
+    let raw: RawDeepPossession = {}
+    try { raw = JSON.parse(rawText) as RawDeepPossession } catch {}
+    const rawOutcome = typeof raw.outcome === 'string' ? raw.outcome : ''
+    const conf = numericConfidence(raw.confidence)
+    const outcome = VALID_OUTCOMES.has(rawOutcome) ? rawOutcome : 'unknown'
+    return { outcome, rawOutcome, confidence: conf, promptTokens, outputTokens }
+  } finally {
+    if (uploadedName) { try { await fileManager.deleteFile(uploadedName) } catch {} }
+  }
+}

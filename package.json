@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test": "vitest --run",
     "eval": "tsx eval/run-eval.ts",
+    "bench": "tsx eval/bench-outcomes.ts",
     "test:analyzer:int": "vitest --run lib/analyzers/__tests__/gemini-video-analyzer.integration.test.ts"
   },
   "dependencies": {
