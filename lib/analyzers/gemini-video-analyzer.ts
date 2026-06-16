@@ -181,6 +181,14 @@ function mapConfidenceToString(n: number): PossessionResult['confidence'] {
   return 'low'
 }
 
+// The deep prompt emits "defensive_stop" (underscore) but our vocabulary uses
+// "defensive-stop" (hyphen) — without this, every defensive stop was silently
+// dropped to "unknown". Normalize underscores before validating.
+function normalizeOutcome(raw: string | undefined): string {
+  const o = (raw ?? '').trim().toLowerCase().replace(/_/g, '-')
+  return VALID_OUTCOMES.has(o) ? o : 'unknown'
+}
+
 function stripFences(text: string): string {
   return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
 }
@@ -728,7 +736,7 @@ async function analyzeOnePossession(
     summary:         raw.what_happened ?? '',
     coachingInsight: raw.coaching_point ?? '',
     keyObservations: buildKeyObservations(raw),
-    outcome:         VALID_OUTCOMES.has(raw.outcome ?? '') ? raw.outcome! : 'unknown',
+    outcome:         normalizeOutcome(raw.outcome),
     metadata: {
       directionHint: VALID_DIRECTIONS.has(raw.direction ?? '')
         ? raw.direction as PossessionResult['metadata']['directionHint']
@@ -759,9 +767,7 @@ async function analyzeOnePossession(
       : 'unknown',
     tags:             [],
     actionTypes:      toStringArray(raw.action_types),
-    outcome:          VALID_OUTCOMES.has(raw.outcome ?? '')
-      ? raw.outcome as SequenceResult['outcome']
-      : 'unknown',
+    outcome:          normalizeOutcome(raw.outcome) as SequenceResult['outcome'],
     summary:          raw.what_happened ?? '',
     coachingTakeaway: raw.coaching_point ?? '',
     thumbnail:        '',
@@ -1257,7 +1263,7 @@ export async function analyzeClipForOutcome(
     try { raw = JSON.parse(rawText) as RawDeepPossession } catch {}
     const rawOutcome = typeof raw.outcome === 'string' ? raw.outcome : ''
     const conf = numericConfidence(raw.confidence)
-    const outcome = VALID_OUTCOMES.has(rawOutcome) ? rawOutcome : 'unknown'
+    const outcome = normalizeOutcome(rawOutcome)
     return { outcome, rawOutcome, confidence: conf, promptTokens, outputTokens }
   } finally {
     if (uploadedName) { try { await fileManager.deleteFile(uploadedName) } catch {} }
