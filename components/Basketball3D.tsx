@@ -78,37 +78,45 @@ function drawBallCanvas(grayscale: boolean): HTMLCanvasElement {
     ctx.stroke()
   }
 
-  // A real 8-panel basketball, from the front, shows: a horizontal seam
-  // (equator), a vertical seam (meridian), and two curves that BOW outward
-  // from the vertical seam — widest at the equator, converging toward the
-  // poles. Same pattern repeats on the back, so the ball reads correctly as
-  // it spins.
-  // A basketball is: TWO straight seams forming a perfect cross (the vertical
-  // meridian + the horizontal equator), plus TWO curvy seams that flank the
-  // vertical line and ALMOST intersect the cross near the top and bottom —
-  // they come close to the vertical line but do NOT merge into it.
-  const BOW = w / 6        // max bow at the equator → seams evenly spaced (every w/6)
-  const GAP = w * 0.045    // how far the curvy seams stay clear of the vertical line
-  const V_TOP = 0.12       // curvy seams span this far from each pole
-  const V_BOT = 1 - V_TOP
+  // Draw seams as TRUE circles on the sphere, so they wrap all the way around
+  // and the ball reads correctly from every spin angle (no bare patches).
+  // A circle is the set of points at angular radius `rho` from a center
+  // direction `c`; rho = PI/2 gives a great circle. Project each point to
+  // equirectangular texture coords (front +Z maps to the texture center).
+  const strokeSphereCircle = (cx: number, cy: number, cz: number, rho: number) => {
+    // Build an orthonormal basis {c, e1, e2}
+    const ref: [number, number, number] = Math.abs(cy) < 0.9 ? [0, 1, 0] : [1, 0, 0]
+    let e1x = cy * ref[2] - cz * ref[1]
+    let e1y = cz * ref[0] - cx * ref[2]
+    let e1z = cx * ref[1] - cy * ref[0]
+    const e1l = Math.hypot(e1x, e1y, e1z) || 1
+    e1x /= e1l; e1y /= e1l; e1z /= e1l
+    const e2x = cy * e1z - cz * e1y
+    const e2y = cz * e1x - cx * e1z
+    const e2z = cx * e1y - cy * e1x
+    const cr = Math.cos(rho)
+    const sr = Math.sin(rho)
+    strokeCurve(t => {
+      const th = t * 2 * Math.PI
+      const ct = Math.cos(th)
+      const st = Math.sin(th)
+      const px = cr * cx + sr * (ct * e1x + st * e2x)
+      const py = cr * cy + sr * (ct * e1y + st * e2y)
+      const pz = cr * cz + sr * (ct * e1z + st * e2z)
+      const lon = Math.atan2(px, pz)                       // front (+Z) → 0
+      const lat = Math.asin(Math.max(-1, Math.min(1, py)))
+      return [((lon / (2 * Math.PI)) + 0.5) * w, (0.5 - lat / Math.PI) * h]
+    })
+  }
 
-  // Straight seam 1: equator (horizontal)
-  strokeCurve(t => [t * w, h / 2])
-  // Straight seam 2: vertical meridian — front center (w/2) + back center (0/w)
-  for (const cx of [0, w / 2, w]) {
-    strokeCurve(t => [cx, t * h])
-  }
-  // Curvy seams: near the vertical line (a GAP away) at top and bottom, bowing
-  // out to ±BOW at the equator. Drawn around the front (w/2) and back (0/w).
-  for (const center of [0, w / 2]) {
-    for (const dir of [1, -1]) {
-      strokeCurve(t => {
-        const v = V_TOP + t * (V_BOT - V_TOP)
-        const offset = GAP + (BOW - GAP) * Math.sin(Math.PI * t)
-        return [center + dir * offset, v * h]
-      })
-    }
-  }
+  const D = Math.PI / 180
+  // Two straight seams = a perfect cross:
+  strokeSphereCircle(0, 1, 0, Math.PI / 2)   // equator (horizontal great circle)
+  strokeSphereCircle(1, 0, 0, Math.PI / 2)   // meridian (vertical great circle)
+  // Two curvy seams = small circles centered on the left/right sides, so they
+  // bow outward on the front and wrap around to the back.
+  strokeSphereCircle(1, 0, 0, 58 * D)        // right flank
+  strokeSphereCircle(-1, 0, 0, 58 * D)       // left flank
 
   return canvas
 }
