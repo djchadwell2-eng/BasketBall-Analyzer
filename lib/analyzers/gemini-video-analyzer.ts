@@ -340,8 +340,20 @@ NOT GAMEPLAY = warmups, pregame, national anthem, halftime show, timeouts after 
   team huddles, bench reactions, crowd shots, dead ball stoppages, free throw ceremonies,
   score celebration pauses, coaches talking, player introductions, shot clock resets.
 
-A POSSESSION = one team's continuous ball-handling phase, from inbound/rebound/steal/make
-to the next dead ball or change of possession.
+A POSSESSION is ONE team's continuous control of the ball. It STARTS when a team gains
+the ball (inbound, defensive rebound, steal, or after the other team scores) and ENDS
+ONLY when the ball changes hands or the ball is dead — that is:
+  - a made shot, a turnover, the ball going out of bounds, a steal, a defensive rebound
+    by the other team, or a whistle (foul / violation / timeout).
+
+Do NOT start a new possession just because the play changes phase. A fast break that
+flows into a half-court set is STILL ONE possession. Choose the single possession_type
+that best captures the whole trip (use "transition" if it began as a fast break,
+otherwise "half_court", etc.). One possession = exactly one entry.
+
+A normal possession lasts about 5-30 seconds. If you find yourself emitting several
+entries within a few seconds of each other, you are over-splitting one possession —
+combine them into a single entry.
 
 Return ONLY valid JSON:
 {
@@ -363,7 +375,9 @@ POSSESSION TYPES:
   early_offense | late_clock | baseline_out_of_bounds | sideline_out_of_bounds | defensive_sequence
 
 RULES:
-- List EVERY possession in active gameplay -- do not skip or merge possessions
+- List each possession ONCE. Never split one possession into multiple entries because
+  the phase changed (transition into half-court is one entry).
+- Only a dead ball or a change of possession starts a new entry.
 - start_ts and end_ts are seconds from the START OF THIS CLIP
 - gameplay_ranges covers the full continuous windows of live game action in this clip
 - Omit only possessions under 2 seconds where the ball is clearly dead
@@ -483,6 +497,48 @@ async function processWidePass(
   let globalId = 0
   const summaries = results.flat().map(p => ({ ...p, possessionId: globalId++ }))
   return { summaries, chunkErrors }
+}
+
+// Backstop for the prompt: even with stricter instructions the wide pass can
+// still split one possession into short phase fragments (e.g. a 3s "transition"
+// immediately followed by a 3s "half_court"). Merge consecutive segments that
+// are essentially contiguous when at least one is a short fragment, staying
+// within a plausible single-possession length so real possessions aren't
+// glued together. Runs BEFORE the deep pass, so it also cuts billed calls.
+const MERGE_GAP_SECONDS = 2.0       // max gap to treat two segments as continuous
+const FRAGMENT_SECONDS = 4.0        // a segment shorter than this is likely a phase fragment
+const MAX_POSSESSION_SECONDS = 40   // never merge beyond one plausible possession
+
+export function mergeFragmentedPossessions(summaries: PossessionSummary[]): PossessionSummary[] {
+  if (summaries.length <= 1) return summaries
+  const sorted = [...summaries].sort((a, b) => a.startTs - b.startTs)
+  const out: PossessionSummary[] = []
+  let cur = { ...sorted[0] }
+  let domType = cur.possessionType
+  let domDur = cur.endTs - cur.startTs
+
+  for (let i = 1; i < sorted.length; i++) {
+    const n = sorted[i]
+    const gap = n.startTs - cur.endTs
+    const curDur = cur.endTs - cur.startTs
+    const nDur = n.endTs - n.startTs
+    const totalDur = Math.max(cur.endTs, n.endTs) - cur.startTs
+    const oneIsFragment = Math.min(curDur, nDur) < FRAGMENT_SECONDS
+
+    if (gap <= MERGE_GAP_SECONDS && oneIsFragment && totalDur <= MAX_POSSESSION_SECONDS) {
+      cur.endTs = Math.max(cur.endTs, n.endTs)
+      if (nDur > domDur) { domType = n.possessionType; domDur = nDur } // longest segment names it
+    } else {
+      cur.possessionType = domType
+      out.push(cur)
+      cur = { ...n }
+      domType = cur.possessionType
+      domDur = cur.endTs - cur.startTs
+    }
+  }
+  cur.possessionType = domType
+  out.push(cur)
+  return out.map((p, i) => ({ ...p, possessionId: i }))
 }
 
 // =============================================================================
@@ -1070,8 +1126,10 @@ export async function analyzeVideoWithGemini(
   console.log(`[motion-scan] done: ${motionScores.length}s scanned, ${highActionCount} high-action seconds`)
 
   // Component B — wide pass (all possessions, 1fps LOW res)
-  const { summaries: wideSummaries, chunkErrors } = await processWidePass(videoPath, fileManager, model, team)
-  console.log(`[wide-pass] total possessions across all chunks: ${wideSummaries.length}`)
+  const { summaries: rawSummaries, chunkErrors } = await processWidePass(videoPath, fileManager, model, team)
+  // Merge phase-fragments back into whole possessions before the (paid) deep pass
+  const wideSummaries = mergeFragmentedPossessions(rawSummaries)
+  console.log(`[wide-pass] ${rawSummaries.length} raw possessions -> ${wideSummaries.length} after merging fragments`)
 
   if (wideSummaries.length === 0) {
     return {
