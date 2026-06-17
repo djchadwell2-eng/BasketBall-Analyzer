@@ -29,6 +29,7 @@ import type {
   RawSynthesisOutput,
   RawGamePlan,
   RawGamePlanKey,
+  GameplayRange,
   ChunkError,
 } from './gemini-video-analyzer.types'
 
@@ -429,7 +430,7 @@ async function processWideChunk(
   fileManager: GoogleAIFileManager,
   model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
   focusTeam: FocusTeam | null
-): Promise<PossessionSummary[]> {
+): Promise<{ summaries: PossessionSummary[]; gameplayRanges: GameplayRange[] }> {
   console.log(`[wide-pass] chunk ${chunk.index + 1}/${totalChunks} start (offset=${chunk.startOffset}s)`)
   let uploadedName: string | undefined
 
@@ -478,8 +479,14 @@ async function processWideChunk(
         possessionType: rp.possession_type ?? 'half_court',
       }))
 
-    console.log(`[wide-pass] chunk ${chunk.index + 1}/${totalChunks}: ${summaries.length} possessions found`)
-    return summaries
+    // Capture gameplay_ranges for inspection (offset to whole-video time).
+    // NOT used to filter anything yet — measurement only.
+    const gameplayRanges: GameplayRange[] = (Array.isArray(raw.gameplay_ranges) ? raw.gameplay_ranges : [])
+      .filter(r => typeof r?.start === 'number' && typeof r?.end === 'number')
+      .map(r => ({ start: r.start + chunk.startOffset, end: r.end + chunk.startOffset }))
+
+    console.log(`[wide-pass] chunk ${chunk.index + 1}/${totalChunks}: ${summaries.length} possessions found, ${gameplayRanges.length} gameplay_range(s)`)
+    return { summaries, gameplayRanges }
   } finally {
     if (uploadedName) { try { await fileManager.deleteFile(uploadedName) } catch {} }
   }
@@ -490,16 +497,19 @@ async function processWidePass(
   fileManager: GoogleAIFileManager,
   model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
   focusTeam: FocusTeam | null
-): Promise<{ summaries: PossessionSummary[]; chunkErrors: ChunkError[] }> {
+): Promise<{ summaries: PossessionSummary[]; gameplayRanges: GameplayRange[]; chunkErrors: ChunkError[] }> {
   const chunks = await chunkVideo(videoPath)
   const acquire = createSemaphore(MAX_CONCURRENCY)
   const results: PossessionSummary[][] = chunks.map(() => [])
+  const rangeResults: GameplayRange[][] = chunks.map(() => [])
   const chunkErrors: ChunkError[] = []
 
   await Promise.all(chunks.map(async (chunk) => {
     const release = await acquire()
     try {
-      results[chunk.index] = await processWideChunk(chunk, chunks.length, fileManager, model, focusTeam)
+      const { summaries, gameplayRanges } = await processWideChunk(chunk, chunks.length, fileManager, model, focusTeam)
+      results[chunk.index] = summaries
+      rangeResults[chunk.index] = gameplayRanges
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[wide-pass] chunk ${chunk.index} FAILED (non-fatal): ${msg}`)
@@ -512,7 +522,8 @@ async function processWidePass(
 
   let globalId = 0
   const summaries = results.flat().map(p => ({ ...p, possessionId: globalId++ }))
-  return { summaries, chunkErrors }
+  const gameplayRanges = rangeResults.flat().sort((a, b) => a.start - b.start)
+  return { summaries, gameplayRanges, chunkErrors }
 }
 
 // Backstop for the prompt: even with stricter instructions the wide pass can
@@ -524,6 +535,10 @@ async function processWidePass(
 const MERGE_GAP_SECONDS = 2.0       // max gap to treat two segments as continuous
 const FRAGMENT_SECONDS = 4.0        // a segment shorter than this is likely a phase fragment
 const MAX_POSSESSION_SECONDS = 40   // never merge beyond one plausible possession
+
+// Possessions shorter than this are dropped BEFORE the (paid) deep pass — too
+// short to be a real possession worth analyzing. Tunable.
+const MIN_POSSESSION_SECONDS = 3
 
 export function mergeFragmentedPossessions(summaries: PossessionSummary[]): PossessionSummary[] {
   if (summaries.length <= 1) return summaries
@@ -555,6 +570,21 @@ export function mergeFragmentedPossessions(summaries: PossessionSummary[]): Poss
   cur.possessionType = domType
   out.push(cur)
   return out.map((p, i) => ({ ...p, possessionId: i }))
+}
+
+// Drops possessions shorter than MIN_POSSESSION_SECONDS BEFORE the deep pass, so
+// we don't pay to analyze segments too short to be a real possession. Returns
+// both kept and dropped so callers can log exactly what was cut (audit).
+export function filterShortPossessions(
+  summaries: PossessionSummary[]
+): { kept: PossessionSummary[]; dropped: PossessionSummary[] } {
+  const kept: PossessionSummary[] = []
+  const dropped: PossessionSummary[] = []
+  for (const p of summaries) {
+    if (p.endTs - p.startTs < MIN_POSSESSION_SECONDS) dropped.push(p)
+    else kept.push(p)
+  }
+  return { kept, dropped }
 }
 
 // =============================================================================
@@ -1180,10 +1210,20 @@ export async function analyzeVideoWithGemini(
   console.log(`[motion-scan] done: ${motionScores.length}s scanned, ${highActionCount} high-action seconds`)
 
   // Component B — wide pass (all possessions, 1fps LOW res)
-  const { summaries: rawSummaries, chunkErrors } = await processWidePass(videoPath, fileManager, model, team)
+  const { summaries: rawSummaries, gameplayRanges, chunkErrors } = await processWidePass(videoPath, fileManager, model, team)
+  // Measurement only (not used to filter yet): inspect gameplay_ranges quality.
+  console.log(`[wide-pass] gameplay_ranges captured: ${gameplayRanges.length} range(s) ${JSON.stringify(gameplayRanges.map(r => [Math.round(r.start), Math.round(r.end)]))}`)
   // Merge phase-fragments back into whole possessions before the (paid) deep pass
-  const wideSummaries = mergeFragmentedPossessions(rawSummaries)
-  console.log(`[wide-pass] ${rawSummaries.length} raw possessions -> ${wideSummaries.length} after merging fragments`)
+  const mergedSummaries = mergeFragmentedPossessions(rawSummaries)
+  console.log(`[wide-pass] ${rawSummaries.length} raw possessions -> ${mergedSummaries.length} after merging fragments`)
+
+  // Pre-deep-pass filter: drop possessions too short to be real, before we pay
+  // for deep analysis. Logs each drop (id + duration) for auditing.
+  const { kept: wideSummaries, dropped: shortDropped } = filterShortPossessions(mergedSummaries)
+  for (const d of shortDropped) {
+    console.log(`[pre-deep] DROP possession ${d.possessionId}: ${(d.endTs - d.startTs).toFixed(1)}s < ${MIN_POSSESSION_SECONDS}s (${d.startTs.toFixed(1)}s–${d.endTs.toFixed(1)}s, ${d.possessionType})`)
+  }
+  console.log(`[pre-deep] short-possession filter (<${MIN_POSSESSION_SECONDS}s): ${mergedSummaries.length} -> ${wideSummaries.length} (dropped ${shortDropped.length})`)
 
   if (wideSummaries.length === 0) {
     return {
