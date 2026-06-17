@@ -1307,6 +1307,43 @@ export async function analyzeVideoWithGemini(
 export { parseEvents }
 
 // =============================================================================
+// Cheap inspection hook — run ONLY the wide pass (+ merge + short filter) and
+// return counts and gameplay_ranges, WITHOUT the deep pass. Lets you eyeball
+// gameplay_ranges quality for ~$1 (full game) instead of a full ~$10 analysis.
+// =============================================================================
+export async function inspectWidePass(videoPath: string, focusTeam: FocusTeam | null = null): Promise<{
+  rawCount: number
+  mergedCount: number
+  keptCount: number
+  droppedShort: PossessionSummary[]
+  gameplayRanges: GameplayRange[]
+  videoDuration: number
+  chunkErrors: ChunkError[]
+}> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('[inspectWidePass] GEMINI_API_KEY is not set.')
+  const genAI = new GoogleGenerativeAI(apiKey)
+  const fileManager = new GoogleAIFileManager(apiKey)
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
+
+  let videoDuration = 0
+  try { videoDuration = await getVideoDurationSeconds(videoPath) } catch {}
+
+  const { summaries: rawSummaries, gameplayRanges, chunkErrors } = await processWidePass(videoPath, fileManager, model, focusTeam)
+  const merged = mergeFragmentedPossessions(rawSummaries)
+  const { kept, dropped } = filterShortPossessions(merged)
+  return {
+    rawCount: rawSummaries.length,
+    mergedCount: merged.length,
+    keptCount: kept.length,
+    droppedShort: dropped,
+    gameplayRanges,
+    videoDuration,
+    chunkErrors,
+  }
+}
+
+// =============================================================================
 // Cheap eval hook — run the deep pass on ONE pre-extracted clip and return its
 // outcome. eval/bench-outcomes.ts uses this to iterate on the deep-pass prompt
 // and resolution against a small fixed set of clips for ~$0.50, instead of
