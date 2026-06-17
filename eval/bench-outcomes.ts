@@ -98,6 +98,9 @@ async function main() {
   let promptTokens = 0
   let outputTokens = 0
 
+  let thinkingTokens = 0
+  let truncated = 0
+
   for (const p of chosen) {
     const clip = path.join(CLIPS_DIR, `${labelsBase}_p${p.possession}.mp4`)
     if (fresh || !fs.existsSync(clip)) await extractClip(videoPath, p.start, p.end, clip)
@@ -105,8 +108,19 @@ async function main() {
     const r = await analyzeClipForOutcome(clip, p.start, p.end, null, crops)
     promptTokens += r.promptTokens
     outputTokens += r.outputTokens
+    thinkingTokens += r.thinkingTokens
+    // A clipped answer = JSON didn't parse OR the model hit the output cap.
+    const clipped = !r.parsedOk || r.finishReason === 'MAX_TOKENS'
+    if (clipped) truncated++
     rows.push({ p, predicted: r.outcome, raw: r.rawOutcome, conf: r.confidence })
-    console.log(`  #${p.possession} ${fmt(p.start)}  truth=${p.outcome}  predicted=${r.outcome}${norm(r.rawOutcome) !== norm(r.outcome) ? ` (model said "${r.rawOutcome}")` : ''}  conf=${r.confidence.toFixed(2)}`)
+    const flags = `${r.parsedOk ? '' : ' PARSE-FAIL!'}${r.finishReason === 'MAX_TOKENS' ? ' MAX_TOKENS!' : ''}`
+    console.log(
+      `\n  #${p.possession} ${fmt(p.start)}  truth=${p.outcome}  predicted=${r.outcome}` +
+      `${norm(r.rawOutcome) !== norm(r.outcome) ? ` (model said "${r.rawOutcome}")` : ''}` +
+      `  conf=${r.confidence.toFixed(2)}  think=${r.thinkingTokens} out=${r.outputTokens} finish=${r.finishReason}${flags}`
+    )
+    if (r.whatHappened) console.log(`     what_happened: ${r.whatHappened}`)
+    if (r.coachingPoint) console.log(`     coaching_point: ${r.coachingPoint}`)
   }
 
   const correct = rows.filter(r => norm(r.predicted) === norm(r.p.outcome)).length
@@ -126,7 +140,10 @@ async function main() {
   for (const t of Object.keys(confusion).sort()) {
     console.log(`  truth ${t.padEnd(14)} -> ${Object.entries(confusion[t]).map(([k, v]) => `${k}=${v}`).join('  ')}`)
   }
-  console.log(`\ntokens: ${promptTokens} in + ${outputTokens} out   est. cost this run: $${cost.toFixed(2)}`)
+  const denom = rows.length || 1
+  console.log(`\ntokens: ${promptTokens} in + ${outputTokens} out (of which ${thinkingTokens} thinking)   est. cost this run: $${cost.toFixed(2)}`)
+  console.log(`per-possession avg: think=${Math.round(thinkingTokens / denom)}  out=${Math.round(outputTokens / denom)}`)
+  console.log(`clipped answers (parse-fail or MAX_TOKENS): ${truncated}/${rows.length}`)
   console.log(`(clips cached in eval/clips/ — re-runs only pay for the Gemini calls)`)
 }
 

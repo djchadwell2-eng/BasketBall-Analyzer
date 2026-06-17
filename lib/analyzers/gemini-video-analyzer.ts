@@ -43,9 +43,10 @@ export const MEDIA_RESOLUTION = 'MEDIA_RESOLUTION_MEDIUM'
 
 // Deep-pass reasoning effort. gemini-3.5-flash is a Gemini 3.x model: thinking
 // cannot be disabled, and it uses thinking_level (minimal | low | medium | high),
-// NOT thinking_budget. "medium" is the model default, so this is behavior-neutral
-// until changed. Flip this one constant to eval low/minimal later.
-export const THINKING_LEVEL: 'minimal' | 'low' | 'medium' | 'high' = 'medium'
+// NOT thinking_budget. The model default is "medium"; lower levels reduce
+// thinking tokens (cheaper) but change output. Flip this one constant to eval
+// medium -> low -> minimal on the same clip set.
+export const THINKING_LEVEL: 'minimal' | 'low' | 'medium' | 'high' = 'low'
 
 // SDK v0.24.0 doesn't type mediaResolution or thinkingConfig; the REST API accepts
 // both, so they ride through as untyped passthrough fields.
@@ -1368,7 +1369,7 @@ export async function analyzeClipForOutcome(
   endTs = 0,
   focusTeam: FocusTeam | null = null,
   scoreboardCrops: string[] = []
-): Promise<{ outcome: string; rawOutcome: string; confidence: number; promptTokens: number; outputTokens: number }> {
+): Promise<{ outcome: string; rawOutcome: string; confidence: number; promptTokens: number; outputTokens: number; thinkingTokens: number; finishReason: string; parsedOk: boolean; whatHappened: string; coachingPoint: string }> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('[analyzeClipForOutcome] GEMINI_API_KEY is not set.')
   const genAI = new GoogleGenerativeAI(apiKey)
@@ -1378,6 +1379,8 @@ export async function analyzeClipForOutcome(
   let uploadedName: string | undefined
   let promptTokens = 0
   let outputTokens = 0
+  let thinkingTokens = 0
+  let finishReason = 'unknown'
   try {
     const { uri, name } = await uploadAndPoll(clipPath, `bench_${Date.now()}`, fileManager)
     uploadedName = name
@@ -1398,15 +1401,25 @@ export async function analyzeClipForOutcome(
         } as ExtendedGenerationConfig,
       })
       const u = res.response.usageMetadata
-      if (u) { promptTokens = u.promptTokenCount ?? 0; outputTokens = (u.totalTokenCount ?? 0) - promptTokens }
+      if (u) {
+        promptTokens = u.promptTokenCount ?? 0
+        outputTokens = (u.totalTokenCount ?? 0) - promptTokens
+        thinkingTokens = Number((u as unknown as Record<string, unknown>).thoughtsTokenCount ?? 0)
+      }
+      finishReason = res.response.candidates?.[0]?.finishReason ?? 'unknown'
       return stripFences(res.response.text())
     })
     let raw: RawDeepPossession = {}
-    try { raw = JSON.parse(rawText) as RawDeepPossession } catch {}
+    let parsedOk = true
+    try { raw = JSON.parse(rawText) as RawDeepPossession } catch { parsedOk = false }
     const rawOutcome = typeof raw.outcome === 'string' ? raw.outcome : ''
     const conf = numericConfidence(raw.confidence)
     const outcome = normalizeOutcome(rawOutcome)
-    return { outcome, rawOutcome, confidence: conf, promptTokens, outputTokens }
+    return {
+      outcome, rawOutcome, confidence: conf, promptTokens, outputTokens, thinkingTokens, finishReason, parsedOk,
+      whatHappened: raw.what_happened ?? '',
+      coachingPoint: raw.coaching_point ?? '',
+    }
   } finally {
     if (uploadedName) { try { await fileManager.deleteFile(uploadedName) } catch {} }
   }
