@@ -40,7 +40,19 @@ export const GEMINI_MODEL = 'gemini-3.5-flash'
 export const CONFIDENCE_THRESHOLD = 0.6
 // SDK v0.24.0 doesn't declare mediaResolution in GenerationConfig; the REST API accepts it.
 export const MEDIA_RESOLUTION = 'MEDIA_RESOLUTION_MEDIUM'
-type ExtendedGenerationConfig = GenerationConfig & { mediaResolution?: string }
+
+// Deep-pass reasoning effort. gemini-3.5-flash is a Gemini 3.x model: thinking
+// cannot be disabled, and it uses thinking_level (minimal | low | medium | high),
+// NOT thinking_budget. "medium" is the model default, so this is behavior-neutral
+// until changed. Flip this one constant to eval low/minimal later.
+export const THINKING_LEVEL: 'minimal' | 'low' | 'medium' | 'high' = 'medium'
+
+// SDK v0.24.0 doesn't type mediaResolution or thinkingConfig; the REST API accepts
+// both, so they ride through as untyped passthrough fields.
+type ExtendedGenerationConfig = GenerationConfig & {
+  mediaResolution?: string
+  thinkingConfig?: { thinkingLevel?: string }
+}
 
 const WIDE_MEDIA_RESOLUTION   = 'MEDIA_RESOLUTION_LOW'
 // maxOutputTokens includes the model's hidden thinking tokens. At 4000 the
@@ -758,12 +770,13 @@ async function analyzeOnePossession(
           responseMimeType: 'application/json',
           maxOutputTokens: DEEP_MAX_OUTPUT_TOKENS,
           mediaResolution: MEDIA_RESOLUTION,
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         } as ExtendedGenerationConfig,
       })
       const u = res.response.usageMetadata
       if (u) {
         const thoughts = (u as unknown as Record<string, unknown>).thoughtsTokenCount
-        console.log(`[tokens] possession ${possessionIndex + 1} deep: prompt=${u.promptTokenCount}, output=${u.candidatesTokenCount}, thoughts=${thoughts ?? 'n/a'}, total=${u.totalTokenCount}`)
+        console.log(`[tokens] possession ${possessionIndex + 1} deep (thinking=${THINKING_LEVEL}): prompt=${u.promptTokenCount}, output=${u.candidatesTokenCount}, thoughts=${thoughts ?? 'n/a'}, total=${u.totalTokenCount}`)
       }
       const finishReason = res.response.candidates?.[0]?.finishReason
       console.log(`[diag] possession ${possessionIndex + 1} finishReason=${finishReason}, maxOutputTokens_sent=${DEEP_MAX_OUTPUT_TOKENS}`)
@@ -1381,6 +1394,7 @@ export async function analyzeClipForOutcome(
           responseMimeType: 'application/json',
           maxOutputTokens: DEEP_MAX_OUTPUT_TOKENS,
           mediaResolution: MEDIA_RESOLUTION,
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         } as ExtendedGenerationConfig,
       })
       const u = res.response.usageMetadata
